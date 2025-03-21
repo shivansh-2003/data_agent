@@ -2,18 +2,24 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 import io
 import tempfile
 import time
+import json
 from PIL import Image
 from typing import Optional, Dict, Any
 from pathlib import Path
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
 
 # Import agent implementations
 from data_analyst_agent import create_data_analyst_agent
 from langgraph_agent import create_langgraph_data_analyst_agent
 from agent_base import BaseDataAnalystAgent
+from enhanced_chat import EnhancedChatFunctionality
 
 # Constants
 SUPPORTED_FORMATS = {
@@ -33,6 +39,8 @@ class StreamlitApp:
         self._apply_custom_css()
         # Type hint for agent
         self.agent: Optional[BaseDataAnalystAgent] = None
+        # Initialize enhanced chat functionality
+        self.enhanced_chat = EnhancedChatFunctionality()
     
     def _configure_page(self):
         """Configure Streamlit page settings"""
@@ -227,63 +235,25 @@ class StreamlitApp:
         analysis_methods[analysis_type]()
     
     def render_chat_tab(self):
-        """Render chat interface tab"""
+        """Render enhanced chat interface tab with visualization capabilities"""
         st.header("Chat with Data Analyst AI")
         
         if not st.session_state.data_loaded:
             st.info("Please upload data first.")
             return
         
-        # Chat history container with automatic scrolling
-        chat_container = st.container()
-        
-        # Display chat history
-        with chat_container:
-            for message in st.session_state.chat_history:
-                if message['role'] == 'user':
-                    st.markdown(f"""
-                    <div class='chat-message user'>
-                        <div class='chat-icon'>👤</div>
-                        <div class='chat-content'>{message['content']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""
-                    <div class='chat-message assistant'>
-                        <div class='chat-icon'>🤖</div>
-                        <div class='chat-content'>{message['content']}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-        
-        # Add custom JavaScript for auto-scrolling
-        st.markdown("""
-        <script>
-        // Scroll to the bottom of the chat container
-        function scrollToBottom() {
-            var chatContainer = window.parent.document.querySelector('.stContainer');
-            if (chatContainer) {
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-        }
-        scrollToBottom();
-        </script>
-        """, unsafe_allow_html=True)
-        
-        # Chat input
-        user_input = st.chat_input("Ask about your data...")
-        if user_input:
-            self._process_chat_input(user_input)
+        # Get the DataFrame
+        if hasattr(st.session_state.agent, 'dataframe_tool'):
+            df = st.session_state.agent.dataframe_tool.dataframe
+            if df is not None:
+                # Get the agent's LLM if available
+                llm = st.session_state.agent.llm if hasattr(st.session_state.agent, 'llm') else None
+                
+                # Use the enhanced chat interface
+                self.enhanced_chat.render_chat_interface(df, llm)
+        else:
+            st.error("DataFrame not available. Please reload your data.")
     
-    def _cleanup_temp_files(self):
-        """Clean up any temporary files created during the session"""
-        if st.session_state.temp_file_path and os.path.exists(st.session_state.temp_file_path):
-            try:
-                os.unlink(st.session_state.temp_file_path)
-                st.session_state.temp_file_path = None
-            except Exception as e:
-                if self.verbose:
-                    print(f"Error cleaning up temporary file: {e}")
-
     def _render_data_statistics(self, df: pd.DataFrame):
         """Render basic statistics for the DataFrame"""
         st.subheader("Data Statistics")
@@ -500,49 +470,6 @@ class StreamlitApp:
                         # Display value counts
                         st.dataframe(value_counts)
 
-    def _process_chat_input(self, user_input: str):
-        """Process user chat input and interact with the AI agent"""
-        # Validate that an agent and data are loaded
-        if not st.session_state.data_loaded or st.session_state.agent is None:
-            st.error("Please load data before chatting.")
-            return
-        
-        # Trim and validate input
-        user_input = user_input.strip()
-        if not user_input:
-            st.warning("Please enter a valid message.")
-            return
-        
-        try:
-            # Add user message to chat history
-            st.session_state.chat_history.append({
-                "role": "user", 
-                "content": user_input
-            })
-            
-            # Use the agent's query method to get a response
-            with st.spinner("Generating response..."):
-                response = st.session_state.agent.query(user_input)
-            
-            # Add AI response to chat history
-            st.session_state.chat_history.append({
-                "role": "assistant", 
-                "content": response
-            })
-            
-            # Limit chat history to prevent memory issues
-            if len(st.session_state.chat_history) > 20:
-                st.session_state.chat_history = st.session_state.chat_history[-20:]
-            
-            # Instead of rerun or JavaScript, force a rerun
-            st.rerun()
-        
-        except Exception as e:
-            st.error(f"Error processing chat input: {str(e)}")
-            # Log the error
-            import traceback
-            traceback.print_exc()
-
     def run(self):
         """Run the Streamlit application"""
         st.title("Data Analyst AI Assistant")
@@ -561,6 +488,16 @@ class StreamlitApp:
         with tabs[3]: self.render_chat_tab()
         
         self._cleanup_temp_files()
+
+    def _cleanup_temp_files(self):
+        """Clean up any temporary files created during the session"""
+        if st.session_state.temp_file_path and os.path.exists(st.session_state.temp_file_path):
+            try:
+                os.unlink(st.session_state.temp_file_path)
+                st.session_state.temp_file_path = None
+            except Exception as e:
+                if hasattr(self, 'verbose') and self.verbose:
+                    print(f"Error cleaning up temporary file: {e}")
 
 if __name__ == "__main__":
     app = StreamlitApp()
