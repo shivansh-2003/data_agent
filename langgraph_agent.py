@@ -13,8 +13,9 @@ from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from langgraph.graph import StateGraph, END
-from data_analyst_agent import DataFrameTool, DataVisualizationTool, DataInsightTool
+from data_tools import DataFrameTool, DataVisualizationTool, DataInsightTool
 from ingestion import DataIngestion
+from agent_base import BaseDataAnalystAgent
 
 # Define the state schema
 class AgentState(TypedDict):
@@ -52,7 +53,7 @@ def get_llm(openai_api_key=None, model_name="gpt-4"):
         api_key=openai_api_key
     )
 
-class LangGraphDataAnalystAgent:
+class LangGraphDataAnalystAgent(BaseDataAnalystAgent):
     """
     Data Analyst Agent implemented with LangGraph.
     Uses a graph-based approach for better state management and routing.

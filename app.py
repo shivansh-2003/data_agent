@@ -13,6 +13,7 @@ from pathlib import Path
 # Import agent implementations
 from data_analyst_agent import create_data_analyst_agent
 from langgraph_agent import create_langgraph_data_analyst_agent
+from agent_base import BaseDataAnalystAgent
 
 # Constants
 SUPPORTED_FORMATS = {
@@ -30,6 +31,8 @@ class StreamlitApp:
         self._configure_page()
         self._initialize_session_state()
         self._apply_custom_css()
+        # Type hint for agent
+        self.agent: Optional[BaseDataAnalystAgent] = None
     
     def _configure_page(self):
         """Configure Streamlit page settings"""
@@ -231,10 +234,40 @@ class StreamlitApp:
             st.info("Please upload data first.")
             return
         
+        # Chat history container with automatic scrolling
+        chat_container = st.container()
+        
         # Display chat history
-        for message in st.session_state.chat_history:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"], unsafe_allow_html=True)
+        with chat_container:
+            for message in st.session_state.chat_history:
+                if message['role'] == 'user':
+                    st.markdown(f"""
+                    <div class='chat-message user'>
+                        <div class='chat-icon'>👤</div>
+                        <div class='chat-content'>{message['content']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div class='chat-message assistant'>
+                        <div class='chat-icon'>🤖</div>
+                        <div class='chat-content'>{message['content']}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Add custom JavaScript for auto-scrolling
+        st.markdown("""
+        <script>
+        // Scroll to the bottom of the chat container
+        function scrollToBottom() {
+            var chatContainer = window.parent.document.querySelector('.stContainer');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+        scrollToBottom();
+        </script>
+        """, unsafe_allow_html=True)
         
         # Chat input
         user_input = st.chat_input("Ask about your data...")
@@ -250,6 +283,265 @@ class StreamlitApp:
             except Exception as e:
                 if self.verbose:
                     print(f"Error cleaning up temporary file: {e}")
+
+    def _render_data_statistics(self, df: pd.DataFrame):
+        """Render basic statistics for the DataFrame"""
+        st.subheader("Data Statistics")
+        
+        # Tabs for different types of statistics
+        stats_tabs = st.tabs(["Summary", "Descriptive Stats", "Column Details"])
+        
+        with stats_tabs[0]:
+            # Basic summary
+            st.markdown("### Dataset Overview")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Rows", len(df))
+            with col2:
+                st.metric("Total Columns", len(df.columns))
+            with col3:
+                st.metric("Memory Usage", f"{df.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
+        
+        with stats_tabs[1]:
+            # Descriptive statistics
+            st.markdown("### Descriptive Statistics")
+            numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+            if not numeric_cols.empty:
+                st.dataframe(df[numeric_cols].describe())
+            else:
+                st.info("No numeric columns found for descriptive statistics.")
+        
+        with stats_tabs[2]:
+            # Column details
+            st.markdown("### Column Details")
+            column_details = []
+            for col in df.columns:
+                dtype = str(df[col].dtype)
+                missing = df[col].isna().sum()
+                missing_pct = (missing / len(df)) * 100
+                unique = df[col].nunique()
+                
+                column_details.append({
+                    "Column": col,
+                    "Data Type": dtype,
+                    "Missing Values": f"{missing} ({missing_pct:.2f}%)",
+                    "Unique Values": unique
+                })
+            
+            st.dataframe(pd.DataFrame(column_details))
+
+    def _render_basic_statistics(self):
+        """Render basic statistical analysis"""
+        if not st.session_state.data_loaded:
+            st.info("Please upload data first.")
+            return
+        
+        if hasattr(st.session_state.agent, 'dataframe_tool'):
+            df = st.session_state.agent.dataframe_tool.dataframe
+            if df is not None:
+                # Reuse the data statistics rendering
+                self._render_data_statistics(df)
+
+    def _render_time_series_analysis(self):
+        """Render time series analysis"""
+        if not st.session_state.data_loaded:
+            st.info("Please upload data first.")
+            return
+        
+        if hasattr(st.session_state.agent, 'dataframe_tool'):
+            df = st.session_state.agent.dataframe_tool.dataframe
+            if df is not None:
+                st.subheader("Time Series Analysis")
+                
+                # Identify potential time columns
+                time_cols = df.select_dtypes(include=['datetime64']).columns
+                if len(time_cols) == 0:
+                    # Try to convert columns to datetime
+                    for col in df.columns:
+                        try:
+                            df[col] = pd.to_datetime(df[col])
+                            time_cols = [col]
+                            break
+                        except:
+                            pass
+                
+                if len(time_cols) > 0:
+                    time_col = time_cols[0]
+                    
+                    # Select numeric column for analysis
+                    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+                    
+                    if len(numeric_cols) > 0:
+                        # Allow user to select numeric column
+                        analysis_col = st.selectbox(
+                            "Select column for time series analysis", 
+                            numeric_cols.tolist()
+                        )
+                        
+                        # Resample and plot
+                        st.subheader(f"Time Series of {analysis_col}")
+                        df.set_index(time_col, inplace=True)
+                        
+                        # Resample options
+                        resample_options = {
+                            "Daily": 'D',
+                            "Weekly": 'W',
+                            "Monthly": 'M',
+                            "Quarterly": 'Q',
+                            "Yearly": 'Y'
+                        }
+                        resample_freq = st.selectbox(
+                            "Select resampling frequency", 
+                            list(resample_options.keys())
+                        )
+                        
+                        # Perform resampling
+                        resampled_data = df[analysis_col].resample(resample_options[resample_freq]).mean()
+                        
+                        # Plot
+                        fig = px.line(
+                            x=resampled_data.index, 
+                            y=resampled_data.values, 
+                            title=f"{analysis_col} Over Time ({resample_freq})"
+                        )
+                        st.plotly_chart(fig)
+                        
+                        # Additional time series insights
+                        st.subheader("Time Series Insights")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Mean", f"{resampled_data.mean():.2f}")
+                        with col2:
+                            st.metric("Minimum", f"{resampled_data.min():.2f}")
+                        with col3:
+                            st.metric("Maximum", f"{resampled_data.max():.2f}")
+                    else:
+                        st.warning("No numeric columns found for time series analysis.")
+                else:
+                    st.warning("No time-based columns found in the dataset.")
+
+    def _render_custom_analysis(self):
+        """Render custom analysis options"""
+        if not st.session_state.data_loaded:
+            st.info("Please upload data first.")
+            return
+        
+        if hasattr(st.session_state.agent, 'dataframe_tool'):
+            df = st.session_state.agent.dataframe_tool.dataframe
+            if df is not None:
+                st.subheader("Custom Analysis")
+                
+                # Analysis type selection
+                analysis_type = st.selectbox(
+                    "Select Analysis Type",
+                    [
+                        "Correlation Matrix", 
+                        "Distribution of Numeric Columns", 
+                        "Categorical Column Analysis"
+                    ]
+                )
+                
+                if analysis_type == "Correlation Matrix":
+                    # Correlation matrix
+                    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+                    if len(numeric_cols) > 1:
+                        corr_matrix = df[numeric_cols].corr()
+                        fig = px.imshow(
+                            corr_matrix, 
+                            text_auto=True, 
+                            title="Correlation Matrix of Numeric Columns"
+                        )
+                        st.plotly_chart(fig)
+                    else:
+                        st.warning("Not enough numeric columns for correlation analysis.")
+                
+                elif analysis_type == "Distribution of Numeric Columns":
+                    # Distribution of numeric columns
+                    numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+                    selected_cols = st.multiselect(
+                        "Select columns to analyze", 
+                        numeric_cols.tolist()
+                    )
+                    
+                    if selected_cols:
+                        fig = go.Figure()
+                        for col in selected_cols:
+                            fig.add_trace(go.Histogram(
+                                x=df[col], 
+                                name=col, 
+                                opacity=0.7  # Use opacity in marker
+                            ))
+                        
+                        fig.update_layout(
+                            title="Distribution of Selected Columns", 
+                            barmode='overlay'  # Change this instead of opacity in update_layout
+                        )
+                        st.plotly_chart(fig)
+                    else:
+                        st.warning("Please select columns to analyze.")
+                
+                elif analysis_type == "Categorical Column Analysis":
+                    # Categorical column analysis
+                    cat_cols = df.select_dtypes(include=['object', 'category']).columns
+                    selected_col = st.selectbox(
+                        "Select categorical column", 
+                        cat_cols.tolist()
+                    )
+                    
+                    if selected_col:
+                        value_counts = df[selected_col].value_counts()
+                        fig = px.pie(
+                            values=value_counts.values, 
+                            names=value_counts.index, 
+                            title=f"Distribution of {selected_col}"
+                        )
+                        st.plotly_chart(fig)
+                        
+                        # Display value counts
+                        st.dataframe(value_counts)
+
+    def _process_chat_input(self, user_input: str):
+        """Process user chat input and interact with the AI agent"""
+        # Validate that an agent and data are loaded
+        if not st.session_state.data_loaded or st.session_state.agent is None:
+            st.error("Please load data before chatting.")
+            return
+        
+        # Trim and validate input
+        user_input = user_input.strip()
+        if not user_input:
+            st.warning("Please enter a valid message.")
+            return
+        
+        try:
+            # Add user message to chat history
+            st.session_state.chat_history.append({
+                "role": "user", 
+                "content": user_input
+            })
+            
+            # Use the agent's query method to get a response
+            with st.spinner("Generating response..."):
+                response = st.session_state.agent.query(user_input)
+            
+            # Add AI response to chat history
+            st.session_state.chat_history.append({
+                "role": "assistant", 
+                "content": response
+            })
+            
+            # Limit chat history to prevent memory issues
+            if len(st.session_state.chat_history) > 20:
+                st.session_state.chat_history = st.session_state.chat_history[-20:]
+            
+            # Instead of rerun or JavaScript, force a rerun
+            st.rerun()
+        
+        except Exception as e:
+            st.error(f"Error processing chat input: {str(e)}")
+            # Log the error
+            import traceback
+            traceback.print_exc()
 
     def run(self):
         """Run the Streamlit application"""
