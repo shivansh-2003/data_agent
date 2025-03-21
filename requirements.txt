@@ -1,0 +1,34 @@
+# Core dependencies
+langchain
+langchain-openai
+langgraph
+openai
+
+# Data processing
+pandas
+numpy
+openpyxl  # For Excel file support
+
+# Data visualization
+plotly
+matplotlib
+seaborn
+
+# Web interface
+streamlit
+streamlit-chat
+
+# Document processing
+pytesseract  # OCR for images
+pdf2image    # Convert PDF to images
+PyPDF2       # PDF processing
+pillow       # Image processing
+opencv-python-headless  # Image processing without GUI
+
+# HTTP requests for API calls
+requests
+
+# Utilities
+python-dotenv  # Environment variable management
+tqdm           # Progress bars
+pydantic       # Data validation
