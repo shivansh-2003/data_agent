@@ -18,6 +18,7 @@ import requests
 import json
 from pdf2image import convert_from_path, convert_from_bytes
 import google.generativeai as genai
+import csv
 
 class DataIngestion:
     """
@@ -38,6 +39,17 @@ class DataIngestion:
         self.file_path = None
         self.file_type = None
         self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")  # Load from environment variable if not provided
+        
+        # Initialize Gemini API if key is provided
+        if self.gemini_api_key:
+            try:
+                genai.configure(api_key=self.gemini_api_key)
+                if self.verbose:
+                    print("Gemini API initialized successfully")
+            except Exception as e:
+                if self.verbose:
+                    print(f"Error initializing Gemini API: {e}")
+                self.gemini_api_key = None  # Reset key if initialization fails
     
     def load_data(self, 
                   source: Union[str, pd.DataFrame, bytes], 
@@ -144,7 +156,7 @@ class DataIngestion:
     
     def _extract_table_from_image(self, image_path: str) -> pd.DataFrame:
         """
-        Extract table from an image using OCR or Gemini API if available.
+        Extract table from an image using Google's Gemini model or falling back to OCR.
         
         Args:
             image_path: Path to the image file
@@ -156,38 +168,45 @@ class DataIngestion:
         if self.gemini_api_key:
             try:
                 # Load the image
-                with open(image_path, "rb") as img_file:
-                    img_data = img_file.read()
-                image = Image.open(io.BytesIO(img_data))
+                image = Image.open(image_path)
 
                 # Initialize Gemini Vision model
                 model = genai.GenerativeModel("gemini-1.5-flash")
-
-                # Generate a response from the model
-                response = model.generate_content([image, "Extract the table data from this image in structured format."])
-
-                # Get the extracted text
-                extracted_text = response.text
-
-                # Convert text to structured format
-                lines = extracted_text.strip().split("\n")
-                columns = lines[0].split()  # Extract column headers
-                rows = [line.split() for line in lines[1:]]  # Extract rows
-
-                # Check if the number of columns in rows matches the number of columns
-                adjusted_rows = []
-                for i, row in enumerate(rows):
-                    if len(row) != len(columns):
-                        print(f"Row {i} has {len(row)} columns, expected {len(columns)} columns. Adjusting...")
-                        # Pad or truncate the row to match the number of columns
-                        if len(row) < len(columns):
-                            row += [""] * (len(columns) - len(row))  # Pad with empty strings
-                        else:
-                            row = row[:len(columns)]  # Truncate
-                    adjusted_rows.append(row)
-
-                # Create a DataFrame
-                return pd.DataFrame(adjusted_rows, columns=columns)
+                
+                # Create a specific prompt for better table extraction
+                prompt = """
+                Extract the complete tabular data from this image into a structured format.
+                Format your response ONLY as a CSV-style output with appropriate column headers from the table.
+                Each row should be on a new line, with values separated by commas.
+                If a cell contains a comma, enclose the entire cell content in double quotes.
+                Preserve all cell values exactly as they appear, maintaining case and special characters.
+                Do not include any other text, explanations, or markdown formatting.
+                """
+                
+                # Generate content using the image and prompt
+                response = model.generate_content([prompt, image])
+                
+                # Extract the text content from the response
+                table_text = response.text
+                
+                # Parse the text as CSV data
+                lines = table_text.strip().split('\n')
+                reader = csv.reader(lines)
+                data = list(reader)
+                
+                # Handle potential issues with data parsing
+                if len(data) < 2:  # Need at least headers and one row
+                    if self.verbose:
+                        print("Insufficient data extracted from image. Falling back to OCR.")
+                    raise ValueError("Insufficient data extracted from image")
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(data[1:], columns=data[0])
+                
+                if self.verbose:
+                    print(f"Successfully extracted table with {len(df)} rows and {len(df.columns)} columns using Gemini.")
+                
+                return df
 
             except Exception as e:
                 if self.verbose:
@@ -199,30 +218,76 @@ class DataIngestion:
             # Read the image
             img = cv2.imread(image_path)
             
-            # Preprocess the image
+            # Preprocess the image for better OCR results
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+            
+            # Apply adaptive thresholding to handle different lighting conditions
+            binary = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+            
+            # Improve OCR configuration with table-specific settings
+            custom_config = r'--oem 3 --psm 6 -c preserve_interword_spaces=1'
             
             # Extract text using OCR
-            text = pytesseract.image_to_string(binary)
+            text = pytesseract.image_to_string(binary, config=custom_config)
             
             # Convert OCR text to DataFrame
-            lines = text.strip().split('\n')
+            lines = [line for line in text.strip().split('\n') if line.strip()]
             if not lines:
                 return pd.DataFrame()
                 
-            # Try to identify header
-            header = lines[0].split()
-            data = []
+            # Try to identify header and parse properly
+            header_line = lines[0]
+            # Detect delimiter - could be spaces, tabs, or character patterns
+            potential_delimiters = ['\t', '  ', ' | ', ',', ';']
             
+            best_delimiter = None
+            max_parts = 0
+            
+            for delimiter in potential_delimiters:
+                parts = header_line.split(delimiter)
+                if len(parts) > max_parts:
+                    max_parts = len(parts)
+                    best_delimiter = delimiter
+            
+            # If we couldn't find a good delimiter, use spaces
+            if not best_delimiter or max_parts < 2:
+                best_delimiter = ' '
+                # Clean up header - multiple spaces to single space
+                header = [col for col in ' '.join(header_line.split()).split(' ') if col]
+            else:
+                header = [col.strip() for col in header_line.split(best_delimiter) if col.strip()]
+            
+            # Process data rows
+            data = []
             for line in lines[1:]:
-                values = line.split()
-                if len(values) == len(header):
-                    data.append(values)
+                if best_delimiter == ' ':
+                    # Handle space-delimited data carefully
+                    words = line.split()
+                    if len(words) >= len(header):
+                        # If we have at least enough words for columns
+                        row = words[:len(header)]
+                        data.append(row)
+                    elif words:  # Only add non-empty rows
+                        # Pad with empty strings if needed
+                        row = words + [''] * (len(header) - len(words))
+                        data.append(row)
+                else:
+                    values = [val.strip() for val in line.split(best_delimiter)]
+                    if len(values) >= len(header):
+                        data.append(values[:len(header)])
+                    elif values:  # Only add non-empty rows
+                        row = values + [''] * (len(header) - len(values))
+                        data.append(row)
             
             if header and data:
+                if self.verbose:
+                    print(f"Extracted table with {len(data)} rows and {len(header)} columns using OCR")
                 return pd.DataFrame(data, columns=header)
             else:
+                if self.verbose:
+                    print("Could not identify proper table structure. Returning raw text.")
                 return pd.DataFrame({"text": lines})
 
         except Exception as e:
@@ -232,7 +297,7 @@ class DataIngestion:
     
     def _extract_table_from_image_bytes(self, image_bytes: bytes) -> pd.DataFrame:
         """
-        Extract table from image bytes using OCR or Gemini API if available.
+        Extract table from image bytes using Google's Gemini model or falling back to OCR.
         
         Args:
             image_bytes: Image as bytes
@@ -246,26 +311,21 @@ class DataIngestion:
             temp_path = temp_file.name
         
         try:
-            # Use the file-based method
+            # Use the file version function on the temporary file
             df = self._extract_table_from_image(temp_path)
-            
-            # Clean up
-            os.unlink(temp_path)
-            
             return df
-        
-        except Exception as e:
+        finally:
             # Clean up
-            if os.path.exists(temp_path):
+            try:
                 os.unlink(temp_path)
-                
-            if self.verbose:
-                print(f"Error extracting table from image bytes: {e}")
-            return pd.DataFrame()
+            except Exception as e:
+                if self.verbose:
+                    print(f"Error removing temporary file: {e}")
+                pass
     
     def _extract_tables_from_pdf(self, pdf_path: str) -> pd.DataFrame:
         """
-        Extract tables from PDF file using OCR.
+        Extract tables from PDF file using Google's Gemini model or OCR.
         
         Args:
             pdf_path: Path to the PDF file
@@ -274,32 +334,60 @@ class DataIngestion:
             DataFrame containing the extracted tables
         """
         try:
+            if self.verbose:
+                print(f"Converting PDF to images: {pdf_path}")
+                
             # Convert PDF to images
             images = convert_from_path(pdf_path)
+            
+            if self.verbose:
+                print(f"Extracted {len(images)} pages from PDF")
             
             # Extract tables from each image
             all_dfs = []
             for i, img in enumerate(images):
+                if self.verbose:
+                    print(f"Processing page {i+1}/{len(images)}")
+                    
                 # Save image to temporary file
                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
                     img.save(temp_file.name)
                     temp_path = temp_file.name
                 
-                # Extract table from image
-                df = self._extract_table_from_image(temp_path)
-                
-                # Add page number
-                if not df.empty:
-                    df['page'] = i + 1
-                    all_dfs.append(df)
-                
-                # Clean up
-                os.unlink(temp_path)
+                try:
+                    # Extract table from image
+                    df = self._extract_table_from_image(temp_path)
+                    
+                    # Add page number and source information
+                    if not df.empty:
+                        df['page_number'] = i + 1
+                        df['source_file'] = os.path.basename(pdf_path)
+                        all_dfs.append(df)
+                        
+                        if self.verbose:
+                            print(f"Successfully extracted table with {len(df)} rows from page {i+1}")
+                    else:
+                        if self.verbose:
+                            print(f"No table found on page {i+1}")
+                            
+                finally:
+                    # Clean up temporary file
+                    try:
+                        os.unlink(temp_path)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"Error removing temporary file: {e}")
+                        pass
             
             # Combine all DataFrames
             if all_dfs:
-                return pd.concat(all_dfs, ignore_index=True)
+                if self.verbose:
+                    print(f"Combining {len(all_dfs)} tables from PDF")
+                result = pd.concat(all_dfs, ignore_index=True)
+                return result
             else:
+                if self.verbose:
+                    print("No tables found in PDF")
                 return pd.DataFrame()
                 
         except Exception as e:
@@ -309,7 +397,7 @@ class DataIngestion:
     
     def _extract_tables_from_pdf_bytes(self, pdf_bytes: bytes) -> pd.DataFrame:
         """
-        Extract tables from PDF bytes using OCR.
+        Extract tables from PDF bytes using Google's Gemini model or OCR.
         
         Args:
             pdf_bytes: PDF as bytes
@@ -317,43 +405,27 @@ class DataIngestion:
         Returns:
             DataFrame containing the extracted tables
         """
+        # Save bytes to temporary file
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+            temp_file.write(pdf_bytes)
+            temp_path = temp_file.name
+        
         try:
-            # Convert PDF bytes to images
-            images = convert_from_bytes(pdf_bytes)
-            
-            # Extract tables from each image
-            all_dfs = []
-            for i, img in enumerate(images):
-                # Save image to temporary file
-                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-                    img.save(temp_file.name)
-                    temp_path = temp_file.name
-                
-                # Extract table from image
-                df = self._extract_table_from_image(temp_path)
-                
-                # Add page number
-                if not df.empty:
-                    df['page'] = i + 1
-                    all_dfs.append(df)
-                
-                # Clean up
+            # Use the file version function
+            df = self._extract_tables_from_pdf(temp_path)
+            return df
+        finally:
+            # Clean up
+            try:
                 os.unlink(temp_path)
-            
-            # Combine all DataFrames
-            if all_dfs:
-                return pd.concat(all_dfs, ignore_index=True)
-            else:
-                return pd.DataFrame()
-                
-        except Exception as e:
-            if self.verbose:
-                print(f"Error extracting tables from PDF bytes: {e}")
-            return pd.DataFrame()
+            except Exception as e:
+                if self.verbose:
+                    print(f"Error removing temporary PDF file: {e}")
+                pass
     
     def _extract_table_using_gemini(self, image_path: str) -> pd.DataFrame:
         """
-        Extract table from image using Google Gemini model.
+        Extract table from image using Google Gemini model with improved prompting.
         
         Args:
             image_path: Path to the image file
@@ -364,57 +436,51 @@ class DataIngestion:
         if not self.gemini_api_key:
             raise ValueError("Gemini API key not provided")
         
-        # Read the image and encode as base64
-        with open(image_path, "rb") as image_file:
-            image_data = image_file.read()
+        try:
+            # Load the image using PIL
+            image = Image.open(image_path)
             
-        # Create request to Gemini API
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent"
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": self.gemini_api_key
-        }
-        
-        # Encode image as base64
-        import base64
-        image_b64 = base64.b64encode(image_data).decode("utf-8")
-        
-        # Create payload
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": "Extract the table from this image and format it as a CSV string. Include column headers if present. Only return the CSV data without any explanations or additional text."
-                        },
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": image_b64
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-        
-        # Make request
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            response_json = response.json()
-            csv_text = response_json["candidates"][0]["content"]["parts"][0]["text"]
+            # Initialize Gemini model
+            genai.configure(api_key=self.gemini_api_key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
             
-            # Clean up any markdown formatting
-            if "```" in csv_text:
-                csv_text = csv_text.split("```")[1]
-                if csv_text.startswith("csv\n"):
-                    csv_text = csv_text[4:]
+            # Improved prompt for better CSV extraction
+            prompt = """
+            Extract the complete tabular data from this image into a structured format.
+            Format your response ONLY as a CSV-style output with appropriate column headers from the table.
+            Each row should be on a new line, with values separated by commas.
+            If a cell contains a comma, enclose the entire cell content in double quotes.
+            Preserve all cell values exactly as they appear, maintaining case and special characters.
+            Do not include any other text, explanations, or markdown formatting.
+            """
             
-            # Parse CSV text
-            return pd.read_csv(io.StringIO(csv_text))
-        else:
-            raise Exception(f"API request failed with status code {response.status_code}: {response.text}")
+            # Generate content using the image
+            response = model.generate_content([prompt, image])
+            
+            # Extract the text content from the response
+            table_text = response.text
+            
+            # Parse the text as CSV data
+            lines = table_text.strip().split('\n')
+            reader = csv.reader(lines)
+            data = list(reader)
+            
+            # Handle potential issues with data parsing
+            if len(data) < 2:  # Need at least headers and one row
+                raise ValueError("Insufficient data extracted from image")
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(data[1:], columns=data[0])
+            
+            if self.verbose:
+                print(f"Successfully extracted table with {len(df)} rows and {len(df.columns)} columns using Gemini.")
+            
+            return df
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"Error in Gemini table extraction: {e}")
+            raise
     
     def clean_data(self, 
                    handle_missing: bool = True, 
