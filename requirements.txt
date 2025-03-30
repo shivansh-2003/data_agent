@@ -24,7 +24,7 @@ pdf2image    # Convert PDF to images
 PyPDF2       # PDF processing
 pillow       # Image processing
 opencv-python-headless  # Image processing without GUI
-
+google-generativeai
 # HTTP requests for API calls
 requests
 
@@ -32,3 +32,6 @@ requests
 python-dotenv  # Environment variable management
 tqdm           # Progress bars
 pydantic       # Data validation
+python-multipart
+fastapi
+uvicorn
