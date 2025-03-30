@@ -6,8 +6,8 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import InsightsIcon from '@mui/icons-material/Insights';
-import DataPreview from '../components/DataPreview';
-import VisualizationPanel from '../components/VisualizationPanel';
+import DataPreview from '../components/data/DataPreview';
+import VisualizationPanel from '../components/dashboard/VisualizationPanel';
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('upload');

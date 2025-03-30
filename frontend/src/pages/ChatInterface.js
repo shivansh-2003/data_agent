@@ -1,12 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Box, Typography, Paper, IconButton } from '@mui/material';
+import { Box, Typography, Paper, IconButton, Avatar, Tooltip, Divider } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import { motion, AnimatePresence } from 'framer-motion';
+import ChatInput from '../components/chat/ChatInput';
+import ChatBubble from '../components/chat/ChatBubble';
+import SuggestionChips from '../components/chat/SuggestionChips';
 import '../index.css';
 
 const ChatInterface = () => {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState([
+    { text: 'Hello! I\'m your AI data assistant. How can I help you today?', sender: 'bot', timestamp: new Date() }
+  ]);
+  const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState([
+    'Analyze my sales data',
+    'Create a visualization',
+    'Explain this dataset',
+    'Find patterns in my data'
+  ]);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -17,13 +28,35 @@ const ChatInterface = () => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (input.trim()) {
-      setMessages([...messages, { text: input, sender: 'user' }]);
-      setInput('');
-      // TODO: Add API call to handle bot response
-    }
+  const handleSendMessage = (text) => {
+    // Add user message
+    const userMessage = { text, sender: 'user', timestamp: new Date() };
+    setMessages(prevMessages => [...prevMessages, userMessage]);
+    
+    // Show typing indicator
+    setLoading(true);
+    
+    // Simulate API call for bot response
+    setTimeout(() => {
+      const botResponse = { 
+        text: 'I\'m analyzing your request. This is a simulated response for demonstration purposes.', 
+        sender: 'bot', 
+        timestamp: new Date() 
+      };
+      setMessages(prevMessages => [...prevMessages, botResponse]);
+      setLoading(false);
+      
+      // Update suggestions based on the conversation
+      setSuggestions([
+        'Tell me more about this data',
+        'How can I improve my analysis?',
+        'Show me a different visualization'
+      ]);
+    }, 1500);
+  };
+
+  const handleSuggestionSelect = (suggestion) => {
+    handleSendMessage(suggestion);
   };
 
   // Function to create particles for animation effects
@@ -73,22 +106,37 @@ const ChatInterface = () => {
       flexDirection: 'column',
       height: 'calc(100vh - 64px)',
       bgcolor: '#f9fafb',
-      position: 'relative'
+      position: 'relative',
+      overflow: 'hidden'
     }}>
       <div className="particles-container">
         {createParticles()}
       </div>
+      
+      {/* Header */}
       <Box sx={{
         bgcolor: '#6366f1',
         p: 2,
         color: 'white',
-        borderBottom: '1px solid rgba(255,255,255,0.1)'
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between'
       }}>
-        <Typography variant="h6" component="h1">
-          AI Assistant
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Avatar sx={{ bgcolor: '#4f46e5', mr: 2 }}>
+            <SendIcon />
+          </Avatar>
+          <Typography variant="h6" component="h1">
+            AI Data Assistant
+          </Typography>
+        </Box>
+        <Typography variant="body2">
+          Powered by advanced analytics
         </Typography>
       </Box>
 
+      {/* Chat Messages */}
       <Box 
         className="chat-container hover-3d"
         sx={{
@@ -97,131 +145,71 @@ const ChatInterface = () => {
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 2
+          gap: 2,
+          position: 'relative'
         }}
       >
         <AnimatePresence>
-          {messages.map((message, index) => (
+          {messages.map((msg, index) => (
             <motion.div
               key={index}
               initial={{ opacity: 0, y: 20, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
-              transition={{ 
-                type: "spring", 
-                stiffness: 260, 
-                damping: 20,
-                delay: index * 0.1 % 0.5 // Staggered delay for messages
-              }}
+              transition={{ duration: 0.3 }}
             >
-              <Box
-                className={message.sender === 'user' ? 'message-user' : 'message-bot'}
-                sx={{
-                  display: 'flex',
-                  justifyContent: message.sender === 'user' ? 'flex-end' : 'flex-start',
-                  width: '100%'
-                }}
-              >
-                <Paper
-                  elevation={0}
-                  className={`glow-effect ${message.sender === 'user' ? 'pulse' : ''}`}
-                  sx={{
-                    p: 2,
-                    maxWidth: '70%',
-                    bgcolor: message.sender === 'user' ? '#8b5cf6' : 'white',
-                    color: message.sender === 'user' ? 'white' : 'text.primary',
-                    borderRadius: 2,
-                    position: 'relative',
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 5px 15px rgba(139, 92, 246, 0.2)'
-                    }
-                  }}
-                >
-                  <Typography className={message.sender === 'user' ? 'gradient-text' : ''}>
-                    {message.text}
-                  </Typography>
-                </Paper>
-              </Box>
+              <ChatBubble 
+                message={msg.text}
+                isUser={msg.sender === 'user'}
+                timestamp={msg.timestamp}
+              />
             </motion.div>
           ))}
+          
+          {loading && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <Box sx={{ display: 'flex', ml: 7, mt: 1 }}>
+                <motion.div
+                  animate={{ y: [0, -10, 0] }}
+                  transition={{ duration: 0.5, repeat: Infinity, repeatType: 'loop' }}
+                  style={{ marginRight: 4, width: 8, height: 8, borderRadius: '50%', background: '#6366f1' }}
+                />
+                <motion.div
+                  animate={{ y: [0, -10, 0] }}
+                  transition={{ duration: 0.5, repeat: Infinity, repeatType: 'loop', delay: 0.15 }}
+                  style={{ marginRight: 4, width: 8, height: 8, borderRadius: '50%', background: '#6366f1' }}
+                />
+                <motion.div
+                  animate={{ y: [0, -10, 0] }}
+                  transition={{ duration: 0.5, repeat: Infinity, repeatType: 'loop', delay: 0.3 }}
+                  style={{ width: 8, height: 8, borderRadius: '50%', background: '#6366f1' }}
+                />
+              </Box>
+            </motion.div>
+          )}
         </AnimatePresence>
-        {messages.length > 0 && messages[messages.length - 1].sender === 'user' && (
-          <Box sx={{ display: 'flex', justifyContent: 'flex-start', mt: 2 }}>
-            <div className="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-          </Box>
-        )}
+        
         <div ref={messagesEndRef} />
       </Box>
-
-      <motion.div
-        initial={{ y: 50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.3, type: "spring", stiffness: 500, damping: 30 }}
-      >
-        <Box
-          component="form"
-          onSubmit={handleSubmit}
-          sx={{
-            p: 2,
-            bgcolor: 'white',
-            borderTop: '1px solid rgba(0,0,0,0.1)',
-            display: 'flex',
-            gap: 1,
-            position: 'relative',
-            zIndex: 1,
-            boxShadow: '0 -5px 20px rgba(0,0,0,0.05)'
-          }}
-        >
-          <motion.div
-            whileTap={{ scale: 0.98 }}
-            style={{ flex: 1 }}
-          >
-            <Box
-              component="input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type your message..."
-              sx={{
-                width: '100%',
-                p: 1.5,
-                border: '1px solid rgba(0,0,0,0.1)',
-                borderRadius: 2,
-                outline: 'none',
-                transition: 'all 0.3s ease',
-                '&:focus': {
-                  borderColor: '#6366f1',
-                  boxShadow: '0 0 0 3px rgba(99, 102, 241, 0.2)'
-                }
-              }}
-            />
-          </motion.div>
-          <motion.div
-            whileHover={{ scale: 1.05, rotate: 5 }}
-            whileTap={{ scale: 0.9 }}
-            transition={{ type: "spring", stiffness: 400, damping: 17 }}
-          >
-            <IconButton
-              className="send-button"
-              type="submit"
-              sx={{
-                bgcolor: '#6366f1',
-                color: 'white',
-                '&:hover': {
-                  bgcolor: '#4f46e5'
-                }
-              }}
-            >
-              <SendIcon />
-            </IconButton>
-          </motion.div>
+      
+      {/* Suggestion Chips */}
+      <Box sx={{ p: 2, borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+        <SuggestionChips 
+          suggestions={suggestions} 
+          onSelect={handleSuggestionSelect} 
+        />
       </Box>
-      </motion.div>
+      
+      {/* Input Area */}
+      <Box sx={{ p: 2, borderTop: '1px solid rgba(0,0,0,0.05)', bgcolor: 'white' }}>
+        <ChatInput 
+          onSendMessage={handleSendMessage} 
+          disabled={loading}
+        />
+      </Box>
     </Box>
   );
 };
