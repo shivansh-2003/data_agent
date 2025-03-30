@@ -1,3 +1,5 @@
+/* Global CSS styles for Data Analyst AI Application */
+
 body {
   margin: 0;
   font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -15,7 +17,7 @@ code {
     monospace;
 }
 
-/* Animations */
+/* Animated components */
 .fade-in {
   animation: fadeIn 0.5s ease-in;
 }
@@ -36,7 +38,7 @@ code {
   100% { transform: translateY(0) scale(1); opacity: 1; }
 }
 
-/* Message animations */
+/* Chat message animations */
 .message-user {
   animation: messageUserIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: bottom right;
@@ -93,22 +95,22 @@ code {
   30% { transform: translateY(-6px); }
 }
 
-/* Send button animation */
-.send-button {
+/* Button animations */
+.animated-button {
   position: relative;
   overflow: hidden;
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.send-button:hover {
+.animated-button:hover {
   transform: scale(1.05);
 }
 
-.send-button:active {
+.animated-button:active {
   transform: scale(0.95);
 }
 
-.send-button::before {
+.animated-button::before {
   content: '';
   position: absolute;
   top: 50%;
@@ -121,7 +123,7 @@ code {
   transition: width 0.6s ease-out, height 0.6s ease-out;
 }
 
-.send-button:hover::before {
+.animated-button:hover::before {
   width: 150px;
   height: 150px;
 }
@@ -156,81 +158,19 @@ code {
   background: rgba(99, 102, 241, 0.5);
 }
 
-/* Particle effects */
-.particles-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
+/* Cards and panels */
+.card-hover {
+  transition: all 0.3s ease;
 }
 
-.particle {
-  position: absolute;
-  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
-  border-radius: 50%;
-  opacity: 0;
-  animation: floatParticle 15s linear infinite;
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
 }
 
-@keyframes floatParticle {
-  0% {
-    transform: translateY(0) translateX(0) rotate(0deg) scale(1);
-    opacity: 0;
-  }
-  10% {
-    opacity: 0.5;
-  }
-  90% {
-    opacity: 0.5;
-  }
-  100% {
-    transform: translateY(-1000%) translateX(100px) rotate(360deg) scale(0);
-    opacity: 0;
-  }
-}
-
-/* Chat container 3D effect */
-.chat-container {
-  transform-style: preserve-3d;
-  perspective: 1000px;
-  transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.chat-container:hover {
-  transform: rotateX(2deg);
-}
-
-/* Glow effects */
-.glow-effect {
-  position: relative;
-}
-
-.glow-effect::after {
-  content: '';
-  position: absolute;
-  top: -5px;
-  left: -5px;
-  right: -5px;
-  bottom: -5px;
-  z-index: -1;
-  background: linear-gradient(45deg, #6366f1, #8b5cf6, #6366f1);
-  filter: blur(15px);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  border-radius: inherit;
-}
-
-.glow-effect:hover::after {
-  opacity: 0.7;
-}
-
-/* Pulse animation */
-.pulse {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+/* Loading animation */
+.loading-pulse {
+  animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 @keyframes pulse {
@@ -258,4 +198,27 @@ code {
   to {
     background-position: 200% center;
   }
+}
+
+/* Accessibility modes */
+.high-contrast {
+  filter: contrast(1.5);
+}
+
+.focus-mode {
+  filter: grayscale(0.5);
+}
+
+/* Dark mode overrides */
+.dark-mode {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+
+.dark-mode .MuiPaper-root {
+  background-color: #1e1e1e;
+}
+
+.dark-mode .MuiAppBar-root {
+  background-color: #1a1a1a;
 }

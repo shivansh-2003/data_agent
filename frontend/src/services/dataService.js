@@ -1,4 +1,5 @@
 import { createApiClient, createFormSubmitter } from './api';
+import API_ENDPOINTS from '../constants/apiEndpoints';
 
 /**
  * Service for data-related API operations
@@ -13,13 +14,24 @@ export class DataService {
   /**
    * Upload a file for data processing
    * @param {File} file - The file to upload
+   * @param {Function} onProgress - Optional progress callback
    * @returns {Promise} - Upload response
    */
-  async uploadFile(file) {
+  async uploadFile(file, onProgress = null) {
     const formData = new FormData();
     formData.append('file', file);
     
-    return this.formSubmitter(`sessions/${this.sessionId}/data/upload`, formData);
+    const options = {};
+    
+    // Add progress tracking if callback provided
+    if (onProgress && typeof onProgress === 'function') {
+      options.onUploadProgress = (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(percentCompleted, progressEvent);
+      };
+    }
+    
+    return this.formSubmitter(API_ENDPOINTS.UPLOAD_FILE(this.sessionId), formData, options);
   }
 
   /**
@@ -33,7 +45,7 @@ export class DataService {
     formData.append('data', data);
     formData.append('format', format);
     
-    return this.formSubmitter(`sessions/${this.sessionId}/data/text`, formData);
+    return this.formSubmitter(API_ENDPOINTS.UPLOAD_TEXT(this.sessionId), formData);
   }
 
   /**
@@ -42,7 +54,7 @@ export class DataService {
    * @returns {Promise} - Data preview
    */
   async getDataPreview(rows = 10) {
-    return this.api(`sessions/${this.sessionId}/data/preview?rows=${rows}`, {
+    return this.api(`${API_ENDPOINTS.DATA_PREVIEW(this.sessionId)}?rows=${rows}`, {
       method: 'GET'
     });
   }
@@ -52,7 +64,7 @@ export class DataService {
    * @returns {Promise} - Analysis results
    */
   async getBasicAnalysis() {
-    return this.api(`sessions/${this.sessionId}/analyze/basic`, {
+    return this.api(API_ENDPOINTS.BASIC_ANALYSIS(this.sessionId), {
       method: 'POST'
     });
   }
@@ -63,7 +75,7 @@ export class DataService {
    * @returns {Promise} - Correlation analysis
    */
   async getCorrelationAnalysis(columns = null) {
-    const endpoint = `sessions/${this.sessionId}/analyze/correlation`;
+    const endpoint = API_ENDPOINTS.CORRELATION_ANALYSIS(this.sessionId);
     const options = {
       method: 'POST'
     };
@@ -83,7 +95,7 @@ export class DataService {
    * @returns {Promise} - Time series analysis
    */
   async getTimeSeriesAnalysis(timeColumn, valueColumn, frequency = 'month') {
-    return this.api(`sessions/${this.sessionId}/analyze/timeseries`, {
+    return this.api(API_ENDPOINTS.TIMESERIES_ANALYSIS(this.sessionId), {
       method: 'POST',
       body: JSON.stringify({
         time_column: timeColumn,
@@ -102,7 +114,7 @@ export class DataService {
   async generateVisualization(vizType, options = {}) {
     const { xColumn, yColumn, groupBy, title } = options;
     
-    return this.api(`sessions/${this.sessionId}/visualize`, {
+    return this.api(API_ENDPOINTS.VISUALIZE(this.sessionId), {
       method: 'POST',
       body: JSON.stringify({
         viz_type: vizType,
@@ -113,6 +125,25 @@ export class DataService {
       })
     });
   }
+  
+  /**
+   * Export data to specified format
+   * @param {string} format - Export format (csv, excel, json)
+   * @param {object} options - Export options
+   * @returns {Promise} - Exported data
+   */
+  async exportData(format = 'csv', options = {}) {
+    const endpoint = `${API_ENDPOINTS.DATA_PREVIEW(this.sessionId)}/export`;
+    
+    return this.api(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        format,
+        ...options
+      }),
+      responseType: 'blob' // To handle binary responses
+    });
+  }
 }
 
-export default DataService; 
+export default DataService;

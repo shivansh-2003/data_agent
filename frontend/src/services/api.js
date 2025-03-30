@@ -2,8 +2,8 @@
  * API client configuration
  */
 
-// Base URL for API requests
-const API_BASE_URL = '/'; // Assuming API is proxied through the same host
+// Base URL for API requests - pointing to the deployed backend
+const API_BASE_URL = 'https://data-agent-ww7e.onrender.com';
 
 /**
  * Creates a configured fetch function with authentication token
@@ -94,4 +94,4 @@ export const createFormSubmitter = (token) => {
   };
 };
 
-export default createApiClient; 
+export default createApiClient;

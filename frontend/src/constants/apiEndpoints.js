@@ -1,5 +1,5 @@
 /**
- * API endpoint definitions
+ * API endpoint definitions for the deployed backend
  */
 
 const API_ENDPOINTS = {
@@ -28,4 +28,4 @@ const API_ENDPOINTS = {
   HEALTH: '/health'
 };
 
-export default API_ENDPOINTS; 
+export default API_ENDPOINTS;
