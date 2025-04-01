@@ -10,6 +10,8 @@ from langchain.memory import ConversationBufferMemory
 from langchain.memory.chat_message_histories import StreamlitChatMessageHistory
 import json
 from io import StringIO
+import tempfile
+from ingestion import DataIngestion
 
 # Set page configuration
 st.set_page_config(page_title="CSV Insight Bot", layout="wide")
@@ -41,6 +43,17 @@ with st.sidebar:
 
 # Function to analyze data with LLM
 def analyze_with_llm(df, query, chat_history):
+    """
+    Analyze data using LLM and format the response
+    
+    Args:
+        df: Pandas DataFrame with the data
+        query: User's question
+        chat_history: Conversation history
+        
+    Returns:
+        Dictionary with response information
+    """
     # Create a data summary for context
     buffer = StringIO()
     df.info(buf=buffer)
@@ -58,8 +71,12 @@ def analyze_with_llm(df, query, chat_history):
     # Format conversation history
     conversation_history = ""
     for message in chat_history:
-        role = "Human" if message["role"] == "human" else "Assistant"
-        conversation_history += f"{role}: {message['content']}\n"
+        role = "Human" if message["role"] == "user" else "Assistant"
+        content = message["content"]
+        # Truncate very long messages
+        if len(content) > 500:
+            content = content[:500] + "... [content truncated]"
+        conversation_history += f"{role}: {content}\n"
     
     # Create a prompt template with conversation history
     template = """
@@ -128,18 +145,33 @@ def analyze_with_llm(df, query, chat_history):
         if json_start >= 0 and json_end > json_start:
             json_str = response[json_start:json_end]
             result = json.loads(json_str)
+            
+            # Add a response field for API consistency
+            if "insight" in result and "response" not in result:
+                result["response"] = result["insight"]
+            
+            return result
         else:
+            # Check if response contains "DataFrame operation" or similar phrases
+            # indicating this might be a direct operation result
+            if "dataframe operation" in response.lower() or "operation" in response.lower():
+                return {
+                    "response": response,
+                    "data": {"result": "Operation completed", "details": response}
+                }
+            
             # Fallback if JSON not properly formatted
-            result = {
+            return {
+                "response": response,
                 "insight": response,
                 "visualization_code": "",
                 "visualization_type": None
             }
-        return result
     except Exception as e:
         st.error(f"Error parsing response: {e}")
         st.write("Raw response:", response)
         return {
+            "response": response,
             "insight": response,
             "visualization_code": "",
             "visualization_type": None
@@ -177,6 +209,45 @@ if uploaded_file is not None:
         st.write("Column Types:")
         st.write(df.dtypes)
     
+    # Add support for image table extraction
+    if api_key:
+        st.subheader("Image Table Extraction")
+        st.write("Upload an image containing a table to extract its data.")
+        image_file = st.file_uploader("Upload image with table", type=["jpg", "jpeg", "png"], key="image_uploader")
+        
+        if image_file:
+            with st.spinner("Extracting table from image..."):
+                try:
+                    # Save uploaded image to a temporary file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{image_file.type.split('/')[1]}") as tmp_file:
+                        tmp_file.write(image_file.getvalue())
+                        temp_path = tmp_file.name
+                    
+                    # Use DataIngestion for extraction
+                    data_ingestion = DataIngestion(verbose=True, gemini_api_key=os.environ.get("GEMINI_API_KEY"))
+                    extracted_df = data_ingestion.load_data(temp_path, file_type=image_file.type.split('/')[1])
+                    
+                    if not extracted_df.empty:
+                        st.success(f"Successfully extracted table with {len(extracted_df)} rows and {len(extracted_df.columns)} columns!")
+                        st.dataframe(extracted_df)
+                        
+                        # Option to use the extracted data
+                        if st.button("Use This Extracted Data"):
+                            df = extracted_df
+                            st.session_state.messages = []  # Reset conversation
+                            st.experimental_rerun()
+                    else:
+                        st.error("Failed to extract table from image. Try another image or format.")
+                    
+                    # Clean up temp file
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                    
+                except Exception as e:
+                    st.error(f"Error extracting table: {str(e)}")
+    
     # Display sample data
     with st.expander("Preview Data"):
         st.dataframe(df.head())
@@ -211,30 +282,56 @@ if uploaded_file is not None:
                     # Get analysis from LLM
                     result = analyze_with_llm(df, query, st.session_state.messages)
                     
+                    # Check if the result is already a dictionary (direct API response format)
+                    if isinstance(result, dict) and "response" in result:
+                        # Handle pre-formatted API response
+                        insight = result.get("response", "")
+                        visualization_content = result.get("visualization") 
+                        visualization_code = result.get("visualization_code")
+                        visualization_type = result.get("visualization_type")
+                        data = result.get("data")
+                    else:
+                        # Use the traditional parse logic for LLM responses
+                        insight = result.get("insight", str(result))
+                        visualization_code = result.get("visualization_code", "")
+                        visualization_content = None
+                        visualization_type = result.get("visualization_type")
+                        data = None
+                    
                     # Display insight
-                    st.write(result["insight"])
+                    st.write(insight)
                     
                     # Store visualization in message
                     visualization = None
                     
                     # Display visualization if available
-                    if result["visualization_code"] and result["visualization_code"].strip():
+                    if visualization_content and "<div" in visualization_content and "plotly" in visualization_content.lower():
+                        # Display plotly HTML directly
+                        st.components.v1.html(visualization_content, height=500)
+                        visualization = {"type": "plotly_html", "content": visualization_content}
+                    elif visualization_code and visualization_code.strip():
                         # Create and display visualization
-                        fig = create_visualization(result["visualization_code"], df)
+                        fig = create_visualization(visualization_code, df)
                         if fig:
                             st.pyplot(fig)
                             visualization = fig
                         
                         # Show the code
                         with st.expander("View Visualization Code"):
-                            st.code(result["visualization_code"], language="python")
+                            st.code(visualization_code, language="python")
+                    
+                    # Show data if available
+                    if data and isinstance(data, dict):
+                        with st.expander("View Data Details"):
+                            st.json(data)
             
             # Add assistant response to chat history
             st.session_state.messages.append({
                 "role": "assistant", 
-                "content": result["insight"],
+                "content": insight if isinstance(insight, str) else str(insight),
                 "visualization": visualization,
-                "visualization_code": result["visualization_code"] if "visualization_code" in result else ""
+                "visualization_code": visualization_code if "visualization_code" in locals() and visualization_code else "",
+                "data": data if "data" in locals() and data else None
             })
 else:
     st.info("Please upload a CSV file to begin analysis.")

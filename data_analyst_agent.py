@@ -10,6 +10,7 @@ from langgraph_agent import create_langgraph_data_analyst_agent
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, AIMessage
 from langchain.tools import BaseTool
+import tempfile
 
 from ingestion import DataIngestion
 from agent_base import BaseDataAnalystAgent
@@ -22,13 +23,14 @@ class DataAnalystAgent(BaseDataAnalystAgent):
     Provides similar functionality to the LangGraph agent.
     """
     
-    def __init__(self, openai_api_key=None, model_name="gpt-4"):
+    def __init__(self, openai_api_key=None, model_name="gpt-4", gemini_api_key=None):
         """Initialize the agent with tools and LLM."""
         self.openai_api_key = openai_api_key
         self.model_name = model_name
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
         
         # Initialize data ingestion
-        self.data_ingestion = DataIngestion(verbose=False)
+        self.data_ingestion = DataIngestion(verbose=False, gemini_api_key=self.gemini_api_key)
         
         # Initialize tools
         self.dataframe_tool = DataFrameTool()
@@ -65,15 +67,23 @@ class DataAnalystAgent(BaseDataAnalystAgent):
             _, extension = os.path.splitext(file_path)
             file_type = extension[1:].lower()  # Remove the dot
             
+            # Check if this is an image file that needs special processing
+            image_extensions = ['jpg', 'jpeg', 'png', 'tiff', 'bmp']
+            
             # Use DataIngestion to load and preprocess the file
             df = self.data_ingestion.load_data(file_path, file_type=file_type)
             
+            # For image files, check if we got valid data
+            if file_type in image_extensions and df.empty:
+                return f"Error: Could not extract table data from image. Please try a different image or format."
+            
             # Clean the data
-            df = self.data_ingestion.clean_data(
-                handle_missing=True,
-                handle_duplicates=True,
-                missing_strategy='auto'
-            )
+            if not df.empty:
+                df = self.data_ingestion.clean_data(
+                    handle_missing=True,
+                    handle_duplicates=True,
+                    missing_strategy='auto'
+                )
             
             # Set the DataFrame in the tools
             self.dataframe_tool.dataframe = df
@@ -97,26 +107,48 @@ class DataAnalystAgent(BaseDataAnalystAgent):
     def load_data_from_string(self, data_str, file_format="csv"):
         """Load data from a string."""
         try:
+            df = None
             if file_format.lower() == "csv":
-                self.dataframe_tool.dataframe = pd.read_csv(io.StringIO(data_str))
+                df = pd.read_csv(io.StringIO(data_str))
             elif file_format.lower() in ["excel", "xlsx", "xls"]:
-                self.dataframe_tool.dataframe = pd.read_excel(io.BytesIO(data_str.encode()))
+                df = pd.read_excel(io.BytesIO(data_str.encode()))
             elif file_format.lower() == "json":
-                self.dataframe_tool.dataframe = pd.read_json(io.StringIO(data_str))
+                df = pd.read_json(io.StringIO(data_str))
+            elif file_format.lower() in ["image", "jpg", "jpeg", "png", "tiff", "bmp"]:
+                # For image data provided as base64 or raw bytes
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_format}") as tmp_file:
+                    if isinstance(data_str, bytes):
+                        tmp_file.write(data_str)
+                    else:
+                        tmp_file.write(data_str.encode())
+                    temp_path = tmp_file.name
+                
+                try:
+                    # Use DataIngestion to extract table from image
+                    df = self.data_ingestion.load_data(temp_path, file_type=file_format)
+                    os.unlink(temp_path)
+                except Exception as e:
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                    raise e
             else:
                 return f"Unsupported file format: {file_format}"
             
+            if df is None or df.empty:
+                return f"Could not extract data from the provided {file_format} content."
+            
             # Generate DataFrame description
-            self.dataframe_tool.dataframe_description = self._generate_df_description(
-                self.dataframe_tool.dataframe
-            )
+            self.dataframe_tool.dataframe = df
+            self.dataframe_tool.dataframe_description = self._generate_df_description(df)
             
             # Update state
             self.state["dataframe_loaded"] = True
-            self.state["dataframe"] = self.dataframe_tool.dataframe
+            self.state["dataframe"] = df
             
             # Add message about successful data loading
-            result = f"Data loaded successfully with {len(self.dataframe_tool.dataframe)} rows and {len(self.dataframe_tool.dataframe.columns)} columns.\n{self.dataframe_tool.dataframe_description}"
+            result = f"Data loaded successfully with {len(df)} rows and {len(df.columns)} columns.\n{self.dataframe_tool.dataframe_description}"
             self.state["messages"].append(HumanMessage(content=f"I've loaded {file_format} data"))
             self.state["messages"].append(AIMessage(content=result))
             
@@ -164,23 +196,63 @@ class DataAnalystAgent(BaseDataAnalystAgent):
             # Determine which tool to use (simplified version)
             query_lower = user_input.lower()
             
+            # Choose appropriate tool
             if "visualize" in query_lower or "plot" in query_lower or "chart" in query_lower:
-                response = self.tool_executor.invoke({"name": "visualization_tool", "input": user_input})
+                tool_name = "visualization_tool"
             elif "insight" in query_lower or "summary" in query_lower or "analyze" in query_lower:
-                response = self.tool_executor.invoke({"name": "insight_tool", "input": user_input})
+                tool_name = "insight_tool"
             else:
-                response = self.tool_executor.invoke({"name": "dataframe_tool", "input": user_input})
+                tool_name = "dataframe_tool"
             
-            # Add response to messages
-            self.state["messages"].append(AIMessage(content=response))
+            # Record which tool we're using
+            self.state["current_tool"] = tool_name
             
-            return response
+            # Execute the tool
+            response = self.tool_executor.invoke({"name": tool_name, "input": user_input})
+            
+            # Format response if it's a dictionary
+            if isinstance(response, dict):
+                # Check if this is a tool result with operation info
+                if "result" in response and "operation" in response:
+                    if isinstance(response["result"], dict):
+                        # For nested dictionary results
+                        formatted_response = {
+                            "response": f"{response.get('operation', 'Operation')} completed successfully.",
+                            "data": response["result"]
+                        }
+                    else:
+                        # For simple operation results
+                        formatted_response = {
+                            "response": f"{response.get('operation', 'Operation')}: {response.get('result', '')}"
+                        }
+                    response = formatted_response
+                # If it's a visualization or results dictionary, preserve it
+                elif any(key in response for key in ["visualization", "data", "results"]):
+                    if "response" not in response and "message" in response:
+                        response["response"] = response["message"]
+            
+            # Add response to messages - convert dict to string if needed
+            if isinstance(response, dict):
+                # Store the original response to return to the user
+                original_response = response
+                # Convert to string for the message history
+                message_content = f"Response: {response.get('response', '')}"
+                self.state["messages"].append(AIMessage(content=message_content))
+                # Return the original structured response
+                return original_response
+            else:
+                # If it's already a string, add it directly
+                self.state["messages"].append(AIMessage(content=response))
+                return response
         except Exception as e:
-            return f"Error processing query: {str(e)}"
+            error_msg = f"Error processing query: {str(e)}"
+            # Add error message to history
+            self.state["messages"].append(AIMessage(content=error_msg))
+            return error_msg
 
-def create_data_analyst_agent(openai_api_key=None, model_name="gpt-4"):
+def create_data_analyst_agent(openai_api_key=None, model_name="gpt-4", gemini_api_key=None):
     """Create and return a data analyst agent."""
-    return DataAnalystAgent(openai_api_key=openai_api_key, model_name=model_name)
+    return DataAnalystAgent(openai_api_key=openai_api_key, model_name=model_name, gemini_api_key=gemini_api_key)
 
 # Example usage
 if __name__ == "__main__":

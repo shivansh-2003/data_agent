@@ -184,9 +184,15 @@ class LangGraphDataAnalystAgent(BaseDataAnalystAgent):
         
         try:
             response = self.tool_executor.invoke({"name": "dataframe_tool", "input": query})
-            return {"messages": state["messages"] + [AIMessage(content=response)]}
+            # Handle dictionary responses
+            if isinstance(response, dict):
+                # Convert to string for message history
+                message_content = f"Response: {response.get('response', '')}"
+                return {"messages": state["messages"] + [AIMessage(content=message_content)], "tool_response": response}
+            else:
+                return {"messages": state["messages"] + [AIMessage(content=response)], "tool_response": response}
         except Exception as e:
-            return {"messages": state["messages"] + [AIMessage(content=f"Error executing dataframe operation: {str(e)}")]}
+            return {"messages": state["messages"] + [AIMessage(content=f"Error executing dataframe operation: {str(e)}")], "tool_response": None}
     
     def _execute_visualization_tool(self, state: AgentState):
         """Execute the visualization tool."""
@@ -194,9 +200,15 @@ class LangGraphDataAnalystAgent(BaseDataAnalystAgent):
         
         try:
             response = self.tool_executor.invoke({"name": "visualization_tool", "input": query})
-            return {"messages": state["messages"] + [AIMessage(content=response)]}
+            # Handle dictionary responses
+            if isinstance(response, dict):
+                # Convert to string for message history
+                message_content = f"Response: {response.get('response', '')}"
+                return {"messages": state["messages"] + [AIMessage(content=message_content)], "tool_response": response}
+            else:
+                return {"messages": state["messages"] + [AIMessage(content=response)], "tool_response": response}
         except Exception as e:
-            return {"messages": state["messages"] + [AIMessage(content=f"Error creating visualization: {str(e)}")]}
+            return {"messages": state["messages"] + [AIMessage(content=f"Error creating visualization: {str(e)}")], "tool_response": None}
     
     def _execute_insight_tool(self, state: AgentState):
         """Execute the insight tool."""
@@ -204,9 +216,15 @@ class LangGraphDataAnalystAgent(BaseDataAnalystAgent):
         
         try:
             response = self.tool_executor.invoke({"name": "insight_tool", "input": query})
-            return {"messages": state["messages"] + [AIMessage(content=response)]}
+            # Handle dictionary responses
+            if isinstance(response, dict):
+                # Convert to string for message history
+                message_content = f"Response: {response.get('response', '')}"
+                return {"messages": state["messages"] + [AIMessage(content=message_content)], "tool_response": response}
+            else:
+                return {"messages": state["messages"] + [AIMessage(content=response)], "tool_response": response}
         except Exception as e:
-            return {"messages": state["messages"] + [AIMessage(content=f"Error generating insights: {str(e)}")]}
+            return {"messages": state["messages"] + [AIMessage(content=f"Error generating insights: {str(e)}")], "tool_response": None}
     
     def _human_response(self, state: AgentState):
         """Generate a direct response using the LLM."""
@@ -312,7 +330,11 @@ class LangGraphDataAnalystAgent(BaseDataAnalystAgent):
             # Update state with result
             self.state = result
             
-            # Return the last message
+            # Check if there's a tool_response to return
+            if "tool_response" in result and result["tool_response"] is not None:
+                return result["tool_response"]
+            
+            # Otherwise return the last message content
             if result["messages"]:
                 return result["messages"][-1].content
             return "No response generated."

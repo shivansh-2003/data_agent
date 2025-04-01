@@ -17,8 +17,82 @@ class DataFrameTool(BaseTool):
         """Execute pandas operations on the stored DataFrame."""
         if self.dataframe is None:
             return "No DataFrame is loaded. Please load data first."
-        # (Implement your pandas-based operations here.)
-        return "DataFrame operation executed."
+        
+        try:
+            # Extract operations from the query
+            query_lower = query.lower()
+            
+            # Basic DataFrame operations
+            if "describe" in query_lower or "summary" in query_lower or "statistics" in query_lower:
+                result = self.dataframe.describe().to_dict()
+                return {
+                    "response": "Here are the statistical summaries of the numeric columns:",
+                    "operation": "DataFrame Description",
+                    "result": result
+                }
+            elif "info" in query_lower or "columns" in query_lower or "dtype" in query_lower:
+                info = {
+                    "shape": self.dataframe.shape,
+                    "columns": [
+                        {"name": col, "dtype": str(self.dataframe[col].dtype), 
+                         "non_null": int(self.dataframe[col].count()),
+                         "nulls": int(self.dataframe[col].isna().sum())}
+                        for col in self.dataframe.columns
+                    ]
+                }
+                return {
+                    "response": f"DataFrame has {self.dataframe.shape[0]} rows and {self.dataframe.shape[1]} columns.",
+                    "operation": "DataFrame Info",
+                    "result": info
+                }
+            elif any(term in query_lower for term in ["head", "top", "first few"]):
+                num_rows = 5
+                for num in [str(i) for i in range(1, 11)]:
+                    if num in query_lower:
+                        num_rows = int(num)
+                        break
+                
+                result = self.dataframe.head(num_rows).to_dict(orient="records")
+                return {
+                    "response": f"Here are the first {num_rows} rows of the DataFrame:",
+                    "operation": f"DataFrame Head ({num_rows} rows)",
+                    "result": result
+                }
+            elif any(term in query_lower for term in ["tail", "bottom", "last few"]):
+                num_rows = 5
+                for num in [str(i) for i in range(1, 11)]:
+                    if num in query_lower:
+                        num_rows = int(num)
+                        break
+                
+                result = self.dataframe.tail(num_rows).to_dict(orient="records")
+                return {
+                    "response": f"Here are the last {num_rows} rows of the DataFrame:",
+                    "operation": f"DataFrame Tail ({num_rows} rows)",
+                    "result": result
+                }
+            elif "shape" in query_lower or "dimensions" in query_lower or "size" in query_lower:
+                return {
+                    "response": f"DataFrame has {self.dataframe.shape[0]} rows and {self.dataframe.shape[1]} columns.",
+                    "operation": "DataFrame Shape",
+                    "result": {"rows": self.dataframe.shape[0], "columns": self.dataframe.shape[1]}
+                }
+            # Default response
+            else:
+                return {
+                    "response": "DataFrame operation executed. What would you like to know about the data?",
+                    "operation": "DataFrame Query",
+                    "result": {
+                        "shape": {"rows": self.dataframe.shape[0], "columns": self.dataframe.shape[1]},
+                        "columns": list(self.dataframe.columns)
+                    }
+                }
+        except Exception as e:
+            return {
+                "response": f"Error executing DataFrame operation: {str(e)}",
+                "operation": "Error",
+                "result": None
+            }
 
 # DataVisualizationTool for creating visualizations
 class DataVisualizationTool(BaseTool):
@@ -189,4 +263,20 @@ class DataInsightTool(BaseTool):
         if categorical_cols:
             key_categories = [f"{col} ({df[col].nunique()} categories)" for col in categorical_cols[:3]]
             insights.append(f"Key categorical variables: {', '.join(key_categories)}")
-        return "\n".join(insights) 
+        
+        insight_text = "\n".join(insights)
+        
+        # Return structured response
+        return {
+            "response": insight_text,
+            "operation": "Data Insights",
+            "result": {
+                "dataset_size": {"rows": len(df), "columns": len(df.columns)},
+                "column_types": {
+                    "numeric": numeric_cols,
+                    "categorical": categorical_cols,
+                    "temporal": temporal_cols
+                },
+                "missing_data": {col: int(df[col].isna().sum()) for col in missing_cols} if missing_cols else {}
+            }
+        } 

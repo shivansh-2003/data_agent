@@ -55,6 +55,7 @@ class AgentInitRequest(BaseModel):
     api_key: str
     model_name: str = "gpt-4"
     agent_type: str = "LangChain Agent"
+    gemini_api_key: Optional[str] = None
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -64,6 +65,8 @@ class ChatResponse(BaseModel):
     response: str
     visualization: Optional[str] = None
     visualization_code: Optional[str] = None
+    visualization_type: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
 
 class DataSummaryResponse(BaseModel):
     summary: str
@@ -103,6 +106,13 @@ async def create_session(request: AgentInitRequest):
     try:
         session_id = str(uuid.uuid4())
         
+        # Use provided Gemini API key or get from environment
+        gemini_api_key = request.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        
+        # Set Gemini API key in environment if provided
+        if gemini_api_key:
+            os.environ["GEMINI_API_KEY"] = gemini_api_key
+        
         # Initialize agent based on requested type
         agent_creator = (
             create_langgraph_data_analyst_agent 
@@ -115,13 +125,18 @@ async def create_session(request: AgentInitRequest):
             model_name=request.model_name
         )
         
+        # Update DataIngestion in agent with Gemini API key if present
+        if hasattr(agent, 'data_ingestion'):
+            agent.data_ingestion.gemini_api_key = gemini_api_key
+        
         # Store session data
         active_sessions[session_id] = {
             "agent": agent,
             "created_at": time.time(),
             "last_activity": time.time(),
             "model_name": request.model_name,
-            "agent_type": request.agent_type
+            "agent_type": request.agent_type,
+            "gemini_api_key": gemini_api_key
         }
         
         temp_files[session_id] = []
@@ -154,7 +169,7 @@ async def upload_data(
     agent = get_session_agent(session_id)
     
     # Create temporary file
-    suffix = Path(file.filename).suffix
+    suffix = Path(file.filename).suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
         try:
             # Write uploaded data to temp file
@@ -167,8 +182,30 @@ async def upload_data(
                 temp_files[session_id] = []
             temp_files[session_id].append(temp_path)
             
-            # Process file with agent
-            result = agent.load_data_from_file(temp_path)
+            # Get Gemini API key for image processing if available
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            
+            # Check if it's an image file that needs special processing
+            if suffix in ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']:
+                # Initialize DataIngestion with Gemini API key for image processing
+                data_ingestion = DataIngestion(verbose=True, gemini_api_key=gemini_api_key)
+                
+                # Load data from image
+                df = data_ingestion.load_data(temp_path, file_type=suffix[1:])
+                
+                # Set the DataFrame in the agent
+                agent.dataframe_tool.dataframe = df
+                
+                # Generate DataFrame description
+                if hasattr(agent, '_generate_df_description'):
+                    agent.dataframe_tool.dataframe_description = agent._generate_df_description(df)
+                
+                result = f"Image table data extracted successfully with {len(df)} rows and {len(df.columns)} columns."
+                if hasattr(agent.dataframe_tool, 'dataframe_description'):
+                    result += f"\n{agent.dataframe_tool.dataframe_description}"
+            else:
+                # Process regular file with agent
+                result = agent.load_data_from_file(temp_path)
             
             # Update session activity
             active_sessions[session_id]["last_activity"] = time.time()
@@ -186,7 +223,8 @@ async def upload_data(
                 os.unlink(temp_path)
                 if session_id in temp_files and temp_path in temp_files[session_id]:
                     temp_files[session_id].remove(temp_path)
-            except:
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up temporary file: {cleanup_error}")
                 pass
             raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
@@ -277,20 +315,88 @@ async def chat(session_id: str, request: ChatRequest):
         # Update session activity
         active_sessions[session_id]["last_activity"] = time.time()
         
-        # Extract visualization if present (for DataVisualizationTool responses)
+        # Extract visualization if present
         visualization = None
         visualization_code = None
+        visualization_type = None
+        data = None
+        
+        # Check if the response is a dictionary with visualization information
+        if isinstance(response, dict):
+            # Extract standard fields if they exist
+            visualization = response.get('visualization')
+            visualization_code = response.get('visualization_code')
+            visualization_type = response.get('visualization_type', 'plotly')
+            data = response.get('data')
+            
+            # Get the response text
+            if 'response' in response:
+                response_text = response.get('response')
+            elif 'insight' in response:
+                response_text = response.get('insight', '')
+            elif 'message' in response:
+                response_text = response.get('message', '')
+            else:
+                # If no text field is found, convert the whole dict to a formatted string
+                response_text = json.dumps(response, indent=2)
+            
+            return {
+                "response": response_text,
+                "visualization": visualization,
+                "visualization_code": visualization_code,
+                "visualization_type": visualization_type,
+                "data": data
+            }
         
         # Parse visualization from HTML response if present
-        if isinstance(response, str) and "<div id=" in response and "plotly" in response.lower():
-            # This is a simplistic approach - a more robust method would be needed
-            # for production to properly extract visualizations
-            visualization = response
+        elif isinstance(response, str):
+            # Check if the response is a JSON string
+            if response.strip().startswith('{') and response.strip().endswith('}'):
+                try:
+                    # Try to parse as JSON
+                    parsed_json = json.loads(response)
+                    if isinstance(parsed_json, dict):
+                        # Format nicely for display
+                        response_text = json.dumps(parsed_json, indent=2)
+                        return {
+                            "response": response_text,
+                            "visualization": None,
+                            "visualization_code": None,
+                            "visualization_type": None,
+                            "data": parsed_json
+                        }
+                except json.JSONDecodeError:
+                    # Not valid JSON, continue with normal processing
+                    pass
+            
+            # Extract plotly visualization if present
+            if "<div id=" in response and "plotly" in response.lower():
+                visualization = response
+                visualization_type = "plotly"
+                
+                # Try to extract just the visualization part if it's mixed with text
+                try:
+                    viz_start = response.find("<div")
+                    if viz_start > 0:
+                        text_part = response[:viz_start].strip()
+                        visualization_part = response[viz_start:]
+                        return {
+                            "response": text_part,
+                            "visualization": visualization_part,
+                            "visualization_code": None,
+                            "visualization_type": "plotly",
+                            "data": None
+                        }
+                except:
+                    # If extraction fails, return the whole response as is
+                    pass
         
         return {
             "response": response,
             "visualization": visualization,
-            "visualization_code": visualization_code
+            "visualization_code": visualization_code,
+            "visualization_type": visualization_type,
+            "data": data
         }
     except Exception as e:
         logger.error(f"Error processing chat query: {e}")
@@ -495,6 +601,74 @@ async def setup_periodic_cleanup():
     
     # Start the background task
     asyncio.create_task(cleanup_old_sessions())
+
+# Add this after the data management endpoints
+
+@app.post("/data/extract-table-from-image", summary="Extract table from image")
+async def extract_table_from_image(
+    file: UploadFile = File(...),
+    use_gemini: bool = True
+):
+    """
+    Extract a table from an image file directly without requiring a session
+    """
+    suffix = Path(file.filename).suffix.lower()
+    
+    # Validate file type
+    if suffix not in ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an image file.")
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        try:
+            # Write uploaded data to temp file
+            content = await file.read()
+            tmp_file.write(content)
+            temp_path = tmp_file.name
+            
+            # Get Gemini API key for image processing
+            gemini_api_key = os.getenv("GEMINI_API_KEY") if use_gemini else None
+            
+            # Initialize DataIngestion with appropriate API key
+            data_ingestion = DataIngestion(verbose=True, gemini_api_key=gemini_api_key)
+            
+            # Extract table from image
+            df = data_ingestion.load_data(temp_path, file_type=suffix[1:])
+            
+            if df.empty:
+                return {
+                    "success": False,
+                    "message": "No table data could be extracted from the image.",
+                    "data": None
+                }
+            
+            # Return extracted data
+            return {
+                "success": True,
+                "message": f"Table extracted successfully with {len(df)} rows and {len(df.columns)} columns.",
+                "data": {
+                    "columns": df.columns.tolist(),
+                    "shape": {"rows": df.shape[0], "columns": df.shape[1]},
+                    "sample_data": df.head(10).to_dict(orient="records"),
+                    "full_data": df.to_dict(orient="records")
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error extracting table from image: {e}")
+            # Clean up temp file
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            raise HTTPException(status_code=500, detail=f"Error extracting table: {str(e)}")
+        finally:
+            # Clean up temp file
+            try:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            except Exception as cleanup_error:
+                logger.error(f"Error cleaning up temporary file: {cleanup_error}")
+                pass
 
 # Run the app with uvicorn
 if __name__ == "__main__":

@@ -339,113 +339,7 @@ const DataStatistics = () => {
                     No missing values detected.
                   </Typography>
                 )}
-        
-        {/* Correlation Matrix */}
-        {numericalColumns.length >= 2 && (
-          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-            <Box
-              sx={{
-                py: 1,
-                px: 2,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                bgcolor: 'primary.light',
-                color: 'primary.contrastText',
-                cursor: 'pointer'
-              }}
-              onClick={() => toggleSection('correlation')}
-            >
-              <Typography variant="subtitle1" fontWeight="medium">
-                Correlation Matrix
-              </Typography>
-              <IconButton size="small" sx={{ color: 'inherit' }}>
-                {expandedSections.correlation ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-              </IconButton>
-            </Box>
-            
-            <Collapse in={expandedSections.correlation}>
-              <Box sx={{ p: 2 }}>
-                {correlationResult ? (
-                  <TableContainer sx={{ maxWidth: '100%', overflowX: 'auto' }}>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell></TableCell>
-                          {numericalColumns.map((col) => (
-                            <TableCell key={col.name} align="center">
-                              {col.name}
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {numericalColumns.map((rowCol) => (
-                          <TableRow key={rowCol.name}>
-                            <TableCell component="th" scope="row">
-                              <strong>{rowCol.name}</strong>
-                            </TableCell>
-                            {numericalColumns.map((colCol) => {
-                              const value = correlationResult?.[rowCol.name]?.[colCol.name];
-                              const bgColor = getCorrelationColor(value);
-                              const textColor = getTextColor(bgColor);
-                              
-                              return (
-                                <TableCell 
-                                  key={colCol.name} 
-                                  align="center"
-                                  sx={{ 
-                                    backgroundColor: bgColor,
-                                    color: textColor,
-                                    fontWeight: Math.abs(value) > 0.7 ? 'bold' : 'normal'
-                                  }}
-                                >
-                                  {formatValue(value)}
-                                </TableCell>
-                              );
-                            })}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                ) : (
-                  <Box sx={{ py: 2, textAlign: 'center' }}>
-                    <Button
-                      variant="outlined"
-                      onClick={fetchCorrelation}
-                      startIcon={<RefreshIcon />}
-                    >
-                      Calculate Correlation
-                    </Button>
-                  </Box>
-                )}
-                
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    <strong>Guide:</strong> 
-                    Values close to 1 indicate strong positive correlation (green), 
-                    values close to -1 indicate strong negative correlation (red), 
-                    and values close to 0 indicate little or no correlation.
-                  </Typography>
-                </Box>
               </Box>
-            </Collapse>
-          </Paper>
-        )}
-        
-        {/* Error display */}
-        {error && (
-          <Alert severity="error" sx={{ mt: 3 }}>
-            {error}
-          </Alert>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
-
-export default DataStatistics;      </Box>
             </Box>
           </Collapse>
         </Paper>
@@ -620,6 +514,107 @@ export default DataStatistics;      </Box>
               </Box>
             </Collapse>
           </Paper>
+        )}
+        
+        {/* Correlation Matrix */}
+        {numericalColumns.length >= 2 && (
+          <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+            <Box
+              sx={{
+                py: 1,
+                px: 2,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                bgcolor: 'primary.light',
+                color: 'primary.contrastText',
+                cursor: 'pointer'
+              }}
+              onClick={() => toggleSection('correlation')}
+            >
+              <Typography variant="subtitle1" fontWeight="medium">
+                Correlation Matrix
+              </Typography>
+              <IconButton size="small" sx={{ color: 'inherit' }}>
+                {expandedSections.correlation ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              </IconButton>
+            </Box>
+            
+            <Collapse in={expandedSections.correlation}>
+              <Box sx={{ p: 2 }}>
+                {correlationResult ? (
+                  <TableContainer sx={{ maxWidth: '100%', overflowX: 'auto' }}>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell></TableCell>
+                          {numericalColumns.map((col) => (
+                            <TableCell key={col.name} align="center">
+                              {col.name}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {numericalColumns.map((rowCol) => (
+                          <TableRow key={rowCol.name}>
+                            <TableCell component="th" scope="row">
+                              <strong>{rowCol.name}</strong>
+                            </TableCell>
+                            {numericalColumns.map((colCol) => {
+                              const value = correlationResult?.[rowCol.name]?.[colCol.name];
+                              const bgColor = getCorrelationColor(value);
+                              const textColor = getTextColor(bgColor);
+                              
+                              return (
+                                <TableCell 
+                                  key={colCol.name} 
+                                  align="center"
+                                  sx={{ 
+                                    backgroundColor: bgColor,
+                                    color: textColor,
+                                    fontWeight: Math.abs(value) > 0.7 ? 'bold' : 'normal'
+                                  }}
+                                >
+                                  {formatValue(value)}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Box sx={{ py: 2, textAlign: 'center' }}>
+                    <Button
+                      variant="outlined"
+                      onClick={fetchCorrelation}
+                      startIcon={<RefreshIcon />}
+                    >
+                      Calculate Correlation
+                    </Button>
+                  </Box>
+                )}
+                
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    <strong>Guide:</strong> 
+                    Values close to 1 indicate strong positive correlation (green), 
+                    values close to -1 indicate strong negative correlation (red), 
+                    and values close to 0 indicate little or no correlation.
+                  </Typography>
+                </Box>
+              </Box>
+            </Collapse>
+          </Paper>
+        )}
+        
+        {/* Error display */}
+        {error && (
+          <Alert severity="error" sx={{ mt: 3 }}>
+            {error}
+          </Alert>
         )}
       </CardContent>
     </Card>
