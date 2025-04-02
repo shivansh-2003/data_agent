@@ -20,7 +20,6 @@ load_dotenv()
 
 # Import app components
 from data_analyst_agent import create_data_analyst_agent
-from langgraph_agent import create_langgraph_data_analyst_agent
 from ingestion import DataIngestion
 
 # Configure logging
@@ -52,10 +51,7 @@ temp_files = {}
 
 # Pydantic models for requests and responses
 class AgentInitRequest(BaseModel):
-    api_key: str
     model_name: str = "gpt-4"
-    agent_type: str = "LangChain Agent"
-    gemini_api_key: Optional[str] = None
 
 class ChatRequest(BaseModel):
     session_id: str
@@ -106,27 +102,21 @@ async def create_session(request: AgentInitRequest):
     try:
         session_id = str(uuid.uuid4())
         
-        # Use provided Gemini API key or get from environment
-        gemini_api_key = request.gemini_api_key or os.getenv("GEMINI_API_KEY")
+        # Get API keys from environment
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
         
-        # Set Gemini API key in environment if provided
-        if gemini_api_key:
-            os.environ["GEMINI_API_KEY"] = gemini_api_key
+        if not openai_api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API key not found in environment variables")
         
-        # Initialize agent based on requested type
-        agent_creator = (
-            create_langgraph_data_analyst_agent 
-            if request.agent_type == "LangGraph Agent" 
-            else create_data_analyst_agent
-        )
-        
-        agent = agent_creator(
-            openai_api_key=request.api_key,
+        # Initialize LangChain agent
+        agent = create_data_analyst_agent(
+            openai_api_key=openai_api_key,
             model_name=request.model_name
         )
         
         # Update DataIngestion in agent with Gemini API key if present
-        if hasattr(agent, 'data_ingestion'):
+        if hasattr(agent, 'data_ingestion') and gemini_api_key:
             agent.data_ingestion.gemini_api_key = gemini_api_key
         
         # Store session data
@@ -135,8 +125,7 @@ async def create_session(request: AgentInitRequest):
             "created_at": time.time(),
             "last_activity": time.time(),
             "model_name": request.model_name,
-            "agent_type": request.agent_type,
-            "gemini_api_key": gemini_api_key
+            "agent_type": "LangChain Agent"
         }
         
         temp_files[session_id] = []
@@ -606,8 +595,7 @@ async def setup_periodic_cleanup():
 
 @app.post("/data/extract-table-from-image", summary="Extract table from image")
 async def extract_table_from_image(
-    file: UploadFile = File(...),
-    use_gemini: bool = True
+    file: UploadFile = File(...)
 ):
     """
     Extract a table from an image file directly without requiring a session
@@ -626,9 +614,9 @@ async def extract_table_from_image(
             temp_path = tmp_file.name
             
             # Get Gemini API key for image processing
-            gemini_api_key = os.getenv("GEMINI_API_KEY") if use_gemini else None
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
             
-            # Initialize DataIngestion with appropriate API key
+            # Initialize DataIngestion with Gemini API key
             data_ingestion = DataIngestion(verbose=True, gemini_api_key=gemini_api_key)
             
             # Extract table from image
