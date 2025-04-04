@@ -21,7 +21,7 @@ import {
   Link
 } from '@mui/material';
 import { motion } from 'framer-motion';
-import { Visibility, VisibilityOff, Lock, Api, AccountCircle } from '@mui/icons-material';
+import { Api, AccountCircle, SmartToy } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
 import Loader from '../components/common/Loader';
 
@@ -29,8 +29,6 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, isLoading, login, error } = useAuth();
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
   const [model, setModel] = useState('gpt-4');
   const [agentType, setAgentType] = useState('LangChain Agent');
   const [localError, setLocalError] = useState('');
@@ -47,16 +45,11 @@ const LoginPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!apiKey.trim()) {
-      setLocalError('OpenAI API key is required');
-      return;
-    }
-    
     setLocalError('');
     setIsSubmitting(true);
     
     try {
-      await login(apiKey, model, agentType);
+      await login(model, agentType);
       navigate('/dashboard');
     } catch (err) {
       setLocalError(err.message || 'Authentication failed');
@@ -77,7 +70,7 @@ const LoginPage = () => {
             Connect to the Data Analyst AI
           </Typography>
           <Typography variant="subtitle1" color="text.secondary">
-            Enter your OpenAI API key to access powerful data analysis capabilities
+            Select your model and agent type to start analyzing your data
           </Typography>
         </Box>
         
@@ -88,42 +81,13 @@ const LoginPage = () => {
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                   <Api color="primary" sx={{ mr: 1 }} />
                   <Typography variant="h6">
-                    API Connection
+                    AI Connection
                   </Typography>
                 </Box>
                 
                 <Divider sx={{ mb: 3 }} />
                 
                 <form onSubmit={handleSubmit}>
-                  <TextField
-                    label="OpenAI API Key"
-                    variant="outlined"
-                    fullWidth
-                    margin="normal"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    type={showApiKey ? 'text' : 'password'}
-                    required
-                    placeholder="sk-..."
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <Lock />
-                        </InputAdornment>
-                      ),
-                      endAdornment: (
-                        <InputAdornment position="end">
-                          <IconButton
-                            onClick={() => setShowApiKey(!showApiKey)}
-                            edge="end"
-                          >
-                            {showApiKey ? <VisibilityOff /> : <Visibility />}
-                          </IconButton>
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                  
                   <FormControl fullWidth margin="normal">
                     <InputLabel id="model-select-label">Model</InputLabel>
                     <Select
@@ -176,7 +140,7 @@ const LoginPage = () => {
             <Card elevation={3} sx={{ height: '100%', bgcolor: 'primary.light', color: 'white' }}>
               <CardContent>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <AccountCircle sx={{ mr: 1 }} />
+                  <SmartToy sx={{ mr: 1 }} />
                   <Typography variant="h6">
                     Information
                   </Typography>
@@ -185,43 +149,40 @@ const LoginPage = () => {
                 <Divider sx={{ mb: 3, borderColor: 'rgba(255,255,255,0.2)' }} />
                 
                 <Typography variant="body1" paragraph>
-                  This application requires an OpenAI API key to function. Your API key is used to:
+                  This application provides AI-powered data analysis capabilities. You can:
                 </Typography>
                 
                 <ul style={{ paddingLeft: '1.5rem' }}>
                   <li>
                     <Typography variant="body2" sx={{ mb: 1 }}>
-                      Process your data analysis requests securely
+                      Upload your data for AI-powered analysis
                     </Typography>
                   </li>
                   <li>
                     <Typography variant="body2" sx={{ mb: 1 }}>
-                      Power the AI capabilities of the data analyst assistant
+                      Generate insightful visualizations and interpretations
                     </Typography>
                   </li>
                   <li>
                     <Typography variant="body2" sx={{ mb: 1 }}>
-                      Generate visualizations and insights from your data
+                      Discover patterns and trends in your data
+                    </Typography>
+                  </li>
+                  <li>
+                    <Typography variant="body2" sx={{ mb: 1 }}>
+                      Ask questions about your data in natural language
                     </Typography>
                   </li>
                 </ul>
                 
                 <Typography variant="body2" sx={{ mt: 2 }}>
-                  Your API key is securely transmitted to our backend service and is not stored in your browser.
+                  The API keys are securely managed on our servers - no need to provide your own!
                 </Typography>
                 
                 <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.2)' }} />
                 
                 <Typography variant="body2">
-                  Don't have an OpenAI API key?{' '}
-                  <Link 
-                    href="https://platform.openai.com/api-keys" 
-                    target="_blank" 
-                    rel="noopener"
-                    sx={{ color: 'white', fontWeight: 'bold', textDecoration: 'underline' }}
-                  >
-                    Get one here
-                  </Link>
+                  This application is powered by advanced AI models from OpenAI.
                 </Typography>
               </CardContent>
             </Card>

@@ -2,6 +2,8 @@
  * API client configuration
  */
 
+import config from '../config';
+
 // Base URL for API requests - pointing to the deployed backend
 const API_BASE_URL = 'https://data-agent-ww7e.onrender.com';
 
@@ -10,85 +12,122 @@ const API_BASE_URL = 'https://data-agent-ww7e.onrender.com';
  * @param {string} token - Authentication token
  * @returns {Function} - Configured fetch function
  */
-export const createApiClient = (token) => {
-  const apiClient = async (endpoint, options = {}) => {
-    const baseOptions = {
+export const createApiClient = (sessionId = null) => {
+  const baseUrl = config.api.baseUrl;
+  
+  return async (endpoint, options = {}) => {
+    const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+    
+    const defaultOptions = {
+      method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...(sessionId ? { 'X-Session-ID': sessionId } : {})
+      },
+    };
+    
+    const mergedOptions = {
+      ...defaultOptions,
+      ...options,
+      headers: {
+        ...defaultOptions.headers,
         ...(options.headers || {})
       }
     };
-
-    const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
-    const config = { ...baseOptions, ...options };
-
+    
+    if (mergedOptions.body && typeof mergedOptions.body === 'object' && !(mergedOptions.body instanceof FormData)) {
+      mergedOptions.body = JSON.stringify(mergedOptions.body);
+    }
+    
     try {
-      const response = await fetch(url, config);
+      const response = await fetch(url, mergedOptions);
       
-      // For non-json responses, just return the response object
-      if (!response.headers.get('content-type')?.includes('application/json')) {
+      // Handle non-JSON responses if specified
+      if (options.responseType === 'blob') {
+        return response.blob();
+      }
+      
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        
         if (!response.ok) {
-          throw new Error(`API Error: ${response.status} ${response.statusText}`);
+          throw new Error(data.message || data.detail || 'API request failed');
         }
-        return response;
+        
+        return data;
+      } else {
+        // For non-JSON responses
+        const text = await response.text();
+        
+        if (!response.ok) {
+          throw new Error(text || 'API request failed');
+        }
+        
+        return text;
       }
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || 'API request failed');
-      }
-      
-      return data;
     } catch (error) {
-      console.error(`API Error (${url}):`, error);
+      console.error('API request error:', error);
       throw error;
     }
   };
-
-  return apiClient;
 };
 
 /**
- * Create a form data submit function
- * @param {string} token - Authentication token
- * @returns {Function} - Configured form data submit function
+ * Create a form data submitter for file uploads
+ * @param {string} sessionId - Optional session ID
+ * @returns {Function} - Form submitter function
  */
-export const createFormSubmitter = (token) => {
+export const createFormSubmitter = (sessionId = null) => {
+  const baseUrl = config.api.baseUrl;
+  
   return async (endpoint, formData, options = {}) => {
-    const baseOptions = {
+    const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+    
+    const defaultOptions = {
       method: 'POST',
       headers: {
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-        ...(options.headers || {})
+        ...(sessionId ? { 'X-Session-ID': sessionId } : {})
       },
       body: formData
     };
-
-    const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
-    const config = { ...baseOptions, ...options };
-
+    
+    const mergedOptions = {
+      ...defaultOptions,
+      ...options,
+      headers: {
+        ...defaultOptions.headers,
+        ...(options.headers || {})
+      }
+    };
+    
+    // Don't set Content-Type for FormData, let the browser set it with boundary
+    delete mergedOptions.headers['Content-Type']; 
+    
     try {
-      const response = await fetch(url, config);
+      const response = await fetch(url, mergedOptions);
       
-      // For non-json responses, just return the response object
-      if (!response.headers.get('content-type')?.includes('application/json')) {
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        
         if (!response.ok) {
-          throw new Error(`API Error: ${response.status} ${response.statusText}`);
+          throw new Error(data.message || data.detail || 'API request failed');
         }
-        return response;
+        
+        return data;
+      } else {
+        // For non-JSON responses
+        const text = await response.text();
+        
+        if (!response.ok) {
+          throw new Error(text || 'API request failed');
+        }
+        
+        return text;
       }
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || 'API request failed');
-      }
-      
-      return data;
     } catch (error) {
-      console.error(`Form Submit Error (${url}):`, error);
+      console.error('Form submission error:', error);
       throw error;
     }
   };

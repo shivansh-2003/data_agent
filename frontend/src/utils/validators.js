@@ -26,18 +26,6 @@ export const isNotEmpty = (value) => {
 };
 
 /**
- * Validate an OpenAI API key format
- * @param {string} apiKey - API key to validate
- * @returns {boolean} - Whether the key has the right format
- */
-export const isValidOpenAIKey = (apiKey) => {
-  if (!apiKey) return false;
-  
-  // OpenAI API keys typically start with "sk-" and are 51 characters long
-  return /^sk-[A-Za-z0-9]{48}$/.test(apiKey);
-};
-
-/**
  * Validate that a value is a number
  * @param {any} value - Value to validate
  * @returns {boolean} - Whether the value is a number
@@ -110,7 +98,6 @@ export const validateForm = (validations) => {
 export default {
   isValidEmail,
   isNotEmpty,
-  isValidOpenAIKey,
   isNumber,
   isInRange,
   isValidFileType,

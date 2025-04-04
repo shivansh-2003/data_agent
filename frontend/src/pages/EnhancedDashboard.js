@@ -164,7 +164,7 @@ const EnhancedDashboard = () => {
           
           <Box sx={{ textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary">
-              Connected as: <strong>{user?.apiKey ? '********' + user.apiKey.slice(-5) : 'Anonymous'}</strong>
+              Connected as: <strong>{user?.sessionId ? user.sessionId.slice(0, 8) + '...' : 'Anonymous'}</strong>
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Model: <strong>{user?.model || 'Default'}</strong>

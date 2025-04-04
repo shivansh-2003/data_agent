@@ -36,17 +36,16 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Login function
-  const login = async (apiKey, model = 'gpt-4', agentType = 'LangChain Agent') => {
+  const login = async (model = 'gpt-4', agentType = 'LangChain Agent') => {
     setIsLoading(true);
     setError(null);
     
     try {
-      const response = await authService.createSession(apiKey, model, agentType);
+      const response = await authService.createSession(model, agentType);
       
       if (response && response.session_id) {
         const userData = {
           sessionId: response.session_id,
-          apiKey,
           model,
           agentType,
           createdAt: new Date().toISOString()

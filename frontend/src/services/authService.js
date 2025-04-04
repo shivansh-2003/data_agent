@@ -14,17 +14,15 @@ export class AuthService {
 
   /**
    * Create a new session with the AI agent
-   * @param {string} apiKey - OpenAI API key
    * @param {string} model - Model name to use (default: gpt-4)
    * @param {string} agentType - Type of agent to use (default: LangChain Agent)
    * @returns {Promise} - Session creation response
    */
-  async createSession(apiKey, model = 'gpt-4', agentType = 'LangChain Agent') {
+  async createSession(model = 'gpt-4', agentType = 'LangChain Agent') {
     try {
       const response = await this.api(API_ENDPOINTS.CREATE_SESSION, {
         method: 'POST',
         body: JSON.stringify({
-          api_key: apiKey,
           model_name: model,
           agent_type: agentType
         })
@@ -34,7 +32,6 @@ export class AuthService {
         // Save auth data in localStorage
         const userData = {
           sessionId: response.session_id,
-          apiKey: apiKey,
           model: model,
           agentType: agentType,
           createdAt: new Date().toISOString()

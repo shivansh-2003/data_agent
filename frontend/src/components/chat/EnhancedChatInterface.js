@@ -21,11 +21,14 @@ import PersonIcon from '@mui/icons-material/Person';
 import AutoGraphIcon from '@mui/icons-material/AutoGraph';
 import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import InfoIcon from '@mui/icons-material/Info';
+import CodeIcon from '@mui/icons-material/Code';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import ChatService from '../../services/chatService';
 import LoadingAnimation from '../common/LoadingAnimation';
+import PlotlyViz from '../charts/PlotlyViz';
 
 /**
  * Enhanced chat interface for interacting with the data analyst AI
@@ -168,16 +171,13 @@ const EnhancedChatInterface = ({
           <Typography variant="body1" sx={{ mb: 2 }}>
             {message.content}
           </Typography>
-          <Card variant="outlined" sx={{ mb: 2, overflow: 'hidden' }}>
-            <CardContent sx={{ p: 0 }}>
-              <div dangerouslySetInnerHTML={{ __html: message.visualization }} />
-            </CardContent>
-          </Card>
-          {message.visualization_code && (
-            <Typography variant="caption" color="text.secondary">
-              Visualization code available
-            </Typography>
-          )}
+          
+          <PlotlyViz 
+            htmlContent={message.visualization}
+            title="Data Visualization"
+            code={message.visualization_code}
+            height={400}
+          />
         </Box>
       );
     } else {

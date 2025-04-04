@@ -15,13 +15,15 @@ import {
   Divider,
   Alert,
   IconButton,
-  LinearProgress
+  LinearProgress,
+  Tooltip
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useData } from '../../context/DataContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import PlotlyViz from './PlotlyViz';
 
 /**
  * VisualizationRequest component
@@ -374,30 +376,37 @@ const VisualizationRequest = () => {
                 Visualization Result
               </Typography>
               <Box>
-                <IconButton size="small" onClick={handleClearVisualization}>
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-                <IconButton 
-                  size="small"
-                  onClick={() => {
-                    setShowVisualization(false);
-                    setTimeout(() => setShowVisualization(true), 100);
-                  }}
-                >
-                  <RefreshIcon fontSize="small" />
-                </IconButton>
+                <Tooltip title="Delete visualization">
+                  <IconButton size="small" onClick={handleClearVisualization} sx={{ 
+                    '&:hover': { backgroundColor: 'rgba(244, 67, 54, 0.08)' }
+                  }}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Refresh visualization">
+                  <IconButton 
+                    size="small"
+                    onClick={() => {
+                      setShowVisualization(false);
+                      setTimeout(() => setShowVisualization(true), 100);
+                    }}
+                    sx={{ '&:hover': { backgroundColor: 'rgba(25, 118, 210, 0.08)' } }}
+                  >
+                    <RefreshIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
               </Box>
             </Box>
             
-            <Card variant="outlined">
-              <CardContent sx={{ p: 1 }}>
-                {typeof activeVisualization === 'string' ? (
-                  <div dangerouslySetInnerHTML={{ __html: activeVisualization }} />
-                ) : (
-                  <Typography>No visualization data available.</Typography>
-                )}
-              </CardContent>
-            </Card>
+            {typeof activeVisualization === 'string' ? (
+              <PlotlyViz 
+                htmlContent={activeVisualization}
+                title={title || `${vizType.charAt(0).toUpperCase() + vizType.slice(1)} Chart of ${yColumn} by ${xColumn}`}
+                height={500}
+              />
+            ) : (
+              <Typography>No visualization data available.</Typography>
+            )}
           </Box>
         )}
       </CardContent>
