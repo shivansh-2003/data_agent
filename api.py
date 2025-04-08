@@ -77,6 +77,44 @@ def get_session_agent(session_id: str):
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return active_sessions[session_id]["agent"]
 
+def create_new_agent_session(model_name="gpt-4"):
+    """Helper function to create a new agent session"""
+    try:
+        session_id = str(uuid.uuid4())
+        
+        # Get API keys from environment
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        
+        if not openai_api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API key not found in environment variables")
+        
+        # Initialize LangChain agent
+        agent = create_data_analyst_agent(
+            openai_api_key=openai_api_key,
+            model_name=model_name
+        )
+        
+        # Update DataIngestion in agent with Gemini API key if present
+        if hasattr(agent, 'data_ingestion') and gemini_api_key:
+            agent.data_ingestion.gemini_api_key = gemini_api_key
+        
+        # Store session data
+        active_sessions[session_id] = {
+            "agent": agent,
+            "created_at": time.time(),
+            "last_activity": time.time(),
+            "model_name": model_name,
+            "agent_type": "LangChain Agent"
+        }
+        
+        temp_files[session_id] = []
+        
+        return session_id, agent
+    except Exception as e:
+        logger.error(f"Error creating session: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating session: {str(e)}")
+
 def cleanup_session(session_id: str):
     """Clean up temporary files when a session is deleted"""
     if session_id in temp_files:
@@ -147,100 +185,142 @@ async def delete_session(session_id: str, background_tasks: BackgroundTasks):
     return {"message": f"Session {session_id} scheduled for deletion"}
 
 # Data management endpoints
-@app.post("/sessions/{session_id}/data/upload", summary="Upload and process data")
-async def upload_data(
-    session_id: str,
+@app.post("/upload_data", summary="Upload and process data without requiring a session")
+async def direct_upload_data(
     file: UploadFile = File(...),
+    model_name: str = Form("gpt-4")
 ):
     """
-    Upload a data file and process it
+    Upload a data file, automatically create a session, and process the data.
+    No need to create a session beforehand.
     """
-    agent = get_session_agent(session_id)
-    
-    # Create temporary file
-    suffix = Path(file.filename).suffix.lower()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+    # Create a new session with the specified model
+    try:
+        session_id, agent = create_new_agent_session(model_name)
+        
+        # Create temporary file
+        suffix = Path(file.filename).suffix.lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            try:
+                # Write uploaded data to temp file
+                content = await file.read()
+                tmp_file.write(content)
+                temp_path = tmp_file.name
+                
+                # Track temp file for cleanup
+                temp_files[session_id].append(temp_path)
+                
+                # Get Gemini API key for image processing if available
+                gemini_api_key = os.getenv("GEMINI_API_KEY")
+                
+                # Check if it's an image file that needs special processing
+                if suffix in ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']:
+                    # Initialize DataIngestion with Gemini API key for image processing
+                    data_ingestion = DataIngestion(verbose=True, gemini_api_key=gemini_api_key)
+                    
+                    # Load data from image
+                    df = data_ingestion.load_data(temp_path, file_type=suffix[1:])
+                    
+                    # Set the DataFrame in the agent
+                    agent.dataframe_tool.dataframe = df
+                    
+                    # Generate DataFrame description
+                    if hasattr(agent, '_generate_df_description'):
+                        agent.dataframe_tool.dataframe_description = agent._generate_df_description(df)
+                    
+                    result = f"Image table data extracted successfully with {len(df)} rows and {len(df.columns)} columns."
+                    if hasattr(agent.dataframe_tool, 'dataframe_description'):
+                        result += f"\n{agent.dataframe_tool.dataframe_description}"
+                else:
+                    # Process regular file with agent
+                    result = agent.load_data_from_file(temp_path)
+                
+                # Update session activity
+                active_sessions[session_id]["last_activity"] = time.time()
+                
+                # Check for error in result
+                if isinstance(result, str) and "error" in result.lower():
+                    # Clean up session on error
+                    cleanup_session(session_id)
+                    raise HTTPException(status_code=400, detail=result)
+                
+                # Get a preview of the data for the response
+                df = agent.dataframe_tool.dataframe
+                preview = {
+                    "shape": {"rows": df.shape[0], "columns": df.shape[1]},
+                    "columns": df.columns.tolist(),
+                    "sample_data": df.head(5).to_dict(orient="records")
+                }
+                
+                return {
+                    "message": "Data processed successfully", 
+                    "session_id": session_id,
+                    "model_name": model_name,
+                    "summary": result,
+                    "preview": preview
+                }
+                
+            except Exception as e:
+                logger.error(f"Error processing uploaded file: {e}")
+                # Clean up temp file and session if error
+                try:
+                    os.unlink(temp_path)
+                    cleanup_session(session_id)
+                except Exception as cleanup_error:
+                    logger.error(f"Error cleaning up: {cleanup_error}")
+                raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in auto-session creation: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating session: {str(e)}")
+
+@app.post("/process_text", summary="Process text data without requiring a session")
+async def direct_process_text(
+    data: str = Form(...),
+    format: str = Form("csv"),
+    model_name: str = Form("gpt-4")
+):
+    """
+    Process data from raw text input and automatically create a session.
+    No need to create a session beforehand.
+    """
+    # Create a new session with the specified model
+    try:
+        session_id, agent = create_new_agent_session(model_name)
+        
         try:
-            # Write uploaded data to temp file
-            content = await file.read()
-            tmp_file.write(content)
-            temp_path = tmp_file.name
-            
-            # Track temp file for cleanup
-            if session_id not in temp_files:
-                temp_files[session_id] = []
-            temp_files[session_id].append(temp_path)
-            
-            # Get Gemini API key for image processing if available
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
-            
-            # Check if it's an image file that needs special processing
-            if suffix in ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']:
-                # Initialize DataIngestion with Gemini API key for image processing
-                data_ingestion = DataIngestion(verbose=True, gemini_api_key=gemini_api_key)
-                
-                # Load data from image
-                df = data_ingestion.load_data(temp_path, file_type=suffix[1:])
-                
-                # Set the DataFrame in the agent
-                agent.dataframe_tool.dataframe = df
-                
-                # Generate DataFrame description
-                if hasattr(agent, '_generate_df_description'):
-                    agent.dataframe_tool.dataframe_description = agent._generate_df_description(df)
-                
-                result = f"Image table data extracted successfully with {len(df)} rows and {len(df.columns)} columns."
-                if hasattr(agent.dataframe_tool, 'dataframe_description'):
-                    result += f"\n{agent.dataframe_tool.dataframe_description}"
-            else:
-                # Process regular file with agent
-                result = agent.load_data_from_file(temp_path)
+            result = agent.load_data_from_string(data, file_format=format)
             
             # Update session activity
             active_sessions[session_id]["last_activity"] = time.time()
             
-            # Check for error in result
             if isinstance(result, str) and "error" in result.lower():
+                # Clean up session on error
+                cleanup_session(session_id)
                 raise HTTPException(status_code=400, detail=result)
             
-            return {"message": "Data processed successfully", "summary": result}
+            # Get a preview of the data for the response
+            df = agent.dataframe_tool.dataframe
+            preview = {
+                "shape": {"rows": df.shape[0], "columns": df.shape[1]},
+                "columns": df.columns.tolist(),
+                "sample_data": df.head(5).to_dict(orient="records")
+            }
             
+            return {
+                "message": "Data processed successfully", 
+                "session_id": session_id,
+                "model_name": model_name,
+                "summary": result,
+                "preview": preview
+            }
         except Exception as e:
-            logger.error(f"Error processing uploaded file: {e}")
-            # Clean up temp file if error
-            try:
-                os.unlink(temp_path)
-                if session_id in temp_files and temp_path in temp_files[session_id]:
-                    temp_files[session_id].remove(temp_path)
-            except Exception as cleanup_error:
-                logger.error(f"Error cleaning up temporary file: {cleanup_error}")
-                pass
-            raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
-
-@app.post("/sessions/{session_id}/data/text", summary="Process data from text")
-async def process_text_data(
-    session_id: str,
-    data: str = Form(...),
-    format: str = Form("csv")
-):
-    """
-    Process data from raw text input
-    """
-    agent = get_session_agent(session_id)
-    
-    try:
-        result = agent.load_data_from_string(data, file_format=format)
-        
-        # Update session activity
-        active_sessions[session_id]["last_activity"] = time.time()
-        
-        if isinstance(result, str) and "error" in result.lower():
-            raise HTTPException(status_code=400, detail=result)
-        
-        return {"message": "Data processed successfully", "summary": result}
+            logger.error(f"Error processing text data: {e}")
+            # Clean up session if error
+            cleanup_session(session_id)
+            raise HTTPException(status_code=500, detail=f"Error processing data: {str(e)}")
     except Exception as e:
-        logger.error(f"Error processing text data: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing data: {str(e)}")
+        logger.error(f"Error in auto-session creation: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating session: {str(e)}")
 
 @app.get("/sessions/{session_id}/data/preview", summary="Get a preview of the loaded data")
 async def get_data_preview(session_id: str, rows: int = 10):
@@ -590,73 +670,6 @@ async def setup_periodic_cleanup():
     
     # Start the background task
     asyncio.create_task(cleanup_old_sessions())
-
-# Add this after the data management endpoints
-
-@app.post("/data/extract-table-from-image", summary="Extract table from image")
-async def extract_table_from_image(
-    file: UploadFile = File(...)
-):
-    """
-    Extract a table from an image file directly without requiring a session
-    """
-    suffix = Path(file.filename).suffix.lower()
-    
-    # Validate file type
-    if suffix not in ['.jpg', '.jpeg', '.png', '.tiff', '.bmp']:
-        raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an image file.")
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-        try:
-            # Write uploaded data to temp file
-            content = await file.read()
-            tmp_file.write(content)
-            temp_path = tmp_file.name
-            
-            # Get Gemini API key for image processing
-            gemini_api_key = os.getenv("GEMINI_API_KEY")
-            
-            # Initialize DataIngestion with Gemini API key
-            data_ingestion = DataIngestion(verbose=True, gemini_api_key=gemini_api_key)
-            
-            # Extract table from image
-            df = data_ingestion.load_data(temp_path, file_type=suffix[1:])
-            
-            if df.empty:
-                return {
-                    "success": False,
-                    "message": "No table data could be extracted from the image.",
-                    "data": None
-                }
-            
-            # Return extracted data
-            return {
-                "success": True,
-                "message": f"Table extracted successfully with {len(df)} rows and {len(df.columns)} columns.",
-                "data": {
-                    "columns": df.columns.tolist(),
-                    "shape": {"rows": df.shape[0], "columns": df.shape[1]},
-                    "sample_data": df.head(10).to_dict(orient="records"),
-                    "full_data": df.to_dict(orient="records")
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error extracting table from image: {e}")
-            # Clean up temp file
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-            raise HTTPException(status_code=500, detail=f"Error extracting table: {str(e)}")
-        finally:
-            # Clean up temp file
-            try:
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-            except Exception as cleanup_error:
-                logger.error(f"Error cleaning up temporary file: {cleanup_error}")
-                pass
 
 # Run the app with uvicorn
 if __name__ == "__main__":

@@ -3,7 +3,8 @@ langchain
 langchain-openai
 langgraph
 openai
-
+langchain-community
+langchain-core
 # Data processing
 pandas
 numpy
