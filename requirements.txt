@@ -5,6 +5,7 @@ langgraph
 openai
 langchain-community
 langchain-core
+langchain-experimental
 # Data processing
 pandas
 numpy
@@ -36,3 +37,5 @@ pydantic       # Data validation
 python-multipart
 fastapi
 uvicorn
+tabulate
+pandasai
